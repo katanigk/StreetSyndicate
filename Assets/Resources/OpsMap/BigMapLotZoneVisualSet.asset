@@ -1,0 +1,18 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9d52481240480c34e87d5f24c0ce03b5, type: 3}
+  m_Name: BigMapLotZoneVisualSet
+  m_EditorClassIdentifier: 
+  residential: {fileID: -4718187676513866664, guid: 15832d19ce148a340a0d7a810462d317, type: 3}
+  commercial: {fileID: 1159009453339967113, guid: 8fdb93a08b0db7a44b964ce3967ee76d, type: 3}
+  warehouse: {fileID: 7698253521543340847, guid: 6476708076c442449b4dfd79e406e4bf, type: 3}
+  police: {fileID: 6715957911979874120, guid: f072fd7343394ae4aa4ff114ec9708dd, type: 3}

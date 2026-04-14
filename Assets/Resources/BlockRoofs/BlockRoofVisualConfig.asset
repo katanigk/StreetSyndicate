@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c7546d1034692a047a081dcc926e9f9b, type: 3}
+  m_Name: BlockRoofVisualConfig
+  m_EditorClassIdentifier: 
+  defaultRoof: {fileID: -3077431958795925603, guid: 796017d479bd3bf43be6648acb6edbda, type: 3}
+  simpleResidentialRoofVariants:
+  - {fileID: -3077431958795925603, guid: 796017d479bd3bf43be6648acb6edbda, type: 3}
+  - {fileID: -2363637749294830657, guid: cc18662b3ff4b4746a0391a9e7cab672, type: 3}
+  - {fileID: -4794407679423150872, guid: e392fb3db91d61c4c8f63c310d269586, type: 3}
+  - {fileID: 4604275777446353561, guid: ea80eb2cf96b13e43b1c004229b0812b, type: 3}
+  denseResidentialRingTiles: []
+  denseResidentialCourtyardSprite: {fileID: 0}
+  denseResidentialCenterVariants: []
+  denseResidentialCornerSouthWest: {fileID: -2363637749294830657, guid: cc18662b3ff4b4746a0391a9e7cab672, type: 3}
+  denseResidentialFlatRoof: {fileID: -3077431958795925603, guid: 796017d479bd3bf43be6648acb6edbda, type: 3}
+  roofsByKind: []
+  roofsByCluster: []
