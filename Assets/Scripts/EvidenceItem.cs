@@ -1,24 +1,25 @@
 using System;
 
+/// <summary>Arrest / pre-trial evidence entry (simple). Distinct from <see cref="EvidenceItem"/> in <see cref="PoliceEvidenceSystem"/> (case evidence system).</summary>
 [Serializable]
-public enum EvidenceType
+public enum ArrestEvidenceType
 {
-    Forensic = 0,          // fingerprints, shoeprints, basic ballistics, fibers/blood (no DNA)
-    Physical = 1,          // weapon, clothing, tools, marked bills
-    Testimony = 2,         // witness statement, affidavit, confession
-    Circumstantial = 3,    // pattern, presence, informant lead
-    DocumentsRecords = 4   // station report, receipts, bank slips, ledgers, letters, landline call logs
+    Forensic = 0,
+    Physical = 1,
+    Testimony = 2,
+    Circumstantial = 3,
+    DocumentsRecords = 4
 }
 
 [Serializable]
-public enum EvidenceDirectness
+public enum ArrestEvidenceDirectness
 {
     Indirect = 0,
     Direct = 1
 }
 
 [Serializable]
-public enum EvidenceChainOfCustody
+public enum ArrestEvidenceChainState
 {
     Clean = 0,
     Questionable = 1,
@@ -26,11 +27,11 @@ public enum EvidenceChainOfCustody
 }
 
 [Serializable]
-public class EvidenceItem
+public class ArrestEvidenceItem
 {
-    public EvidenceType Type;
-    public EvidenceDirectness Directness;
-    public EvidenceChainOfCustody Chain = EvidenceChainOfCustody.Clean;
+    public ArrestEvidenceType Type;
+    public ArrestEvidenceDirectness Directness;
+    public ArrestEvidenceChainState Chain = ArrestEvidenceChainState.Clean;
 
     /// <summary>0..100: objective strength before legal attacks.</summary>
     public int Strength;
@@ -41,11 +42,11 @@ public class EvidenceItem
     public string Summary = "";
     public int CollectedAtDay = -1;
 
-    public static EvidenceItem Create(EvidenceType type, int strength, int admissibilityRisk, string summary, int day,
-        EvidenceDirectness directness = EvidenceDirectness.Indirect,
-        EvidenceChainOfCustody chain = EvidenceChainOfCustody.Clean)
+    public static ArrestEvidenceItem Create(ArrestEvidenceType type, int strength, int admissibilityRisk, string summary, int day,
+        ArrestEvidenceDirectness directness = ArrestEvidenceDirectness.Indirect,
+        ArrestEvidenceChainState chain = ArrestEvidenceChainState.Clean)
     {
-        return new EvidenceItem
+        return new ArrestEvidenceItem
         {
             Type = type,
             Strength = Math.Clamp(strength, 0, 100),

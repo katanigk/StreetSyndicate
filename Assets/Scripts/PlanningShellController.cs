@@ -7,6 +7,10 @@ using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
+#if UNITY_EDITOR
+using UnityEditor;
+using UnityEditor.SceneManagement;
+#endif
 
 /// <summary>
 /// Builds the planning shell under MainArea at runtime (title, context strip, left / scrollable center / right).
@@ -110,7 +114,6 @@ public class PlanningShellController : MonoBehaviour
     private static Sprite _cachedUiHitSprite;
     private int _personnelSelectedMemberIndex = -1;
     private Button _legalCodexToggleButton;
-    private bool _legalCodexOpen;
     private LayoutElement _legalLeftTopSpacer;
     private LayoutElement _legalLeftBottomSpacer;
     private Image _legalCodexBookImage;
@@ -119,20 +122,28 @@ public class PlanningShellController : MonoBehaviour
     private TextMeshProUGUI _legalCodexBookCaptionText;
     private static bool _warnedMissingCodexBookSprite;
 
-    // Primary codex book art resource (no extension). Keep fallback to legacy sheet name.
-    private const string CodexBookResourcePath = "UI/Icons/Street Codex (Black Ledger)";
+    // Sidebar thumbnail: unchanged small book art (not the full open spread).
+    private const string CodexSidebarBookResourcePath = "UI/Icons/Street Codex (Black Ledger)";
+    // Full-screen codex modal: wide open-book spread.
+    private const string CodexModalOpenBookResourcePath = "UI/Icons/Street Codex_Open";
     private const string CodexBookLegacyResourcePath = "UI/Icons/icon_codex_open_sheet";
+    /// <summary>Pixels past the left column so dim/panel clear the closed-book hit area in the Legal sidebar.</summary>
+    private const float CodexLeftSidebarExtraGutterPx = 12f;
 
-    // Codex book modal (paged)
+    // Codex book modal (paged, open-book spread)
     private GameObject _codexModalRoot;
     private RectTransform _codexPanelRt;
     private TextMeshProUGUI _codexTitleText;
-    private TextMeshProUGUI _codexBodyText;
+    private TextMeshProUGUI _codexLeftPageText;
+    private TextMeshProUGUI _codexRightPageText;
     private RectTransform _codexTocRoot;
     private readonly List<Button> _codexTocButtons = new List<Button>();
-    private Button _codexPrevButton;
-    private Button _codexNextButton;
+    private Button _codexPagePrevButton;
+    private Button _codexPageNextButton;
     private int _codexPageIndex;
+    private RectTransform _codexDimDismissRt;
+    /// <summary>Width/height of open-book sprite for sizing the modal panel (synced in <see cref="ApplyCodexModalLeftSidebarInset"/>).</summary>
+    private float _codexOpenBookAspect = 1.78f;
 
     private GameObject _institutionModalRoot;
     private RectTransform _institutionModalPanelRt;
@@ -161,14 +172,15 @@ public class PlanningShellController : MonoBehaviour
 
     private enum PoliceModalTabId
     {
-        Stations = 0,
-        PersonnelOrg = 1,
-        Cases = 2,
-        Actions = 3,
-        Overview = 4
+        KnownSituation = 0,
+        KnownPeopleLocations = 1,
+        KnownCasesOps = 2,
+        KnownWeaknessesOpportunities = 3,
+        AvailableActions = 4,
+        OutcomeLog = 5
     }
 
-    private PoliceModalTabId _policeModalTab = PoliceModalTabId.Stations;
+    private PoliceModalTabId _policeModalTab = PoliceModalTabId.KnownSituation;
 
     /// <summary>Batch 14: left-list selection for police window when bound to <see cref="CityData.GovernmentData"/>.</summary>
     private string _policeCityGenStableSelection;
@@ -303,7 +315,7 @@ public class PlanningShellController : MonoBehaviour
     [SerializeField] private Vector2 _aowTurnStripSize = new Vector2(410f, 148f);
     [SerializeField] private float _aowTurnStripGap = 12f;
     [Tooltip("Extra horizontal margin (px) reserved in modal width clearance between turn strip and portrait cluster.")]
-    [SerializeField] private float _aowNextTurnPortraitGapPx = 36f;
+    [SerializeField] private float _aowNextTurnPortraitGapPx = 24f;
     [Tooltip("Boss portrait ring diameter (px). Radial action chips use _aowRadialButtonDiameter separately.")]
     [SerializeField] private Vector2 _aowPortraitSize = new Vector2(400f, 400f);
     [SerializeField] private float _aowPortraitYOffset = 12f;
@@ -312,9 +324,38 @@ public class PlanningShellController : MonoBehaviour
     // X offset applied to the "Next Turn + Times" block only (negative = move left).
     [SerializeField] private float _aowTurnControlsXOffset = -12f;
     // Extra X offset for the times label only (negative = move left).
-    [SerializeField] private float _aowTimesXOffset = -18f;
+    [SerializeField] private float _aowTimesXOffset = -12f;
+    [Header("AoW turn controls (manual slot placement)")]
+    [SerializeField] private Vector2 _aowTimesSlotAnchoredPosition = new Vector2(220f, -68f);
+    [SerializeField] private Vector2 _aowTimesSlotSize = new Vector2(360f, 90f);
+    [SerializeField] private Vector2 _aowNextTurnSlotAnchoredPosition = new Vector2(1050f, -178f);
+    [SerializeField] private Vector2 _aowNextTurnSlotSize = new Vector2(158f, 104f);
+    [Tooltip("When on, Next Turn X is from TurnStrip right edge (recommended). When off, uses anchor top-left + _aowNextTurnSlotAnchoredPosition.x.")]
+    [SerializeField] private bool _aowNextTurnLayoutFromStripRight = true;
+    [Tooltip("Distance left from TurnStrip right edge to NextTurn slot center (px). Smaller = further right toward portrait.")]
+    [SerializeField] private float _aowNextTurnCenterXPxFromStripRight = 680f;
+    [Tooltip("Extra pixels added to Next Turn X (after right-edge layout). Positive = move right.")]
+    [SerializeField] private float _aowNextTurnExtraOffsetXPx = -55f;
+    [Tooltip("When on, Next Turn position is derived from the portrait rect (left edge − gap) so it cannot overlap the portrait; ignores strip-right X math.")]
+    [SerializeField] private bool _aowNextTurnSnapLeftOfPortrait = true;
+    [Tooltip("After snap, vertical offset from portrait cluster bounds center (px). Negative = lower.")]
+    [SerializeField] private float _aowNextTurnSnapVerticalOffsetPx = -28f;
+    [Tooltip("Move date slot right by physical distance (cm).")]
+    [SerializeField] private float _aowTimesNudgeRightCm = 8f;
+    [Tooltip("Move date slot up by physical distance (cm).")]
+    [SerializeField] private float _aowTimesNudgeUpCm = 0f;
+    [Tooltip("Move portrait cluster right by physical distance (cm).")]
+    [SerializeField] private float _aowPortraitNudgeRightCm = 8f;
+    [Tooltip("Move portrait cluster down by physical distance (cm).")]
+    [SerializeField] private float _aowPortraitNudgeDownCm = 2f;
+    [Tooltip("Legacy: used only when _aowNextTurnLayoutFromStripRight is off. When using right-edge layout, use _aowNextTurnExtraOffsetXPx (px) instead — cm here was easy to set too high (~hundreds of px).")]
+    [SerializeField] private float _aowNextTurnNudgeRightCm = 0f;
+    [Tooltip("Move Next Turn slot up by physical distance (cm).")]
+    [SerializeField] private float _aowNextTurnNudgeUpCm = 0f;
     /// <summary>Vertical offset from the center of TimesSlot in px (positive = down, negative = up).</summary>
     [SerializeField] private float _aowTimesTopInsetPx = 0f;
+    [Tooltip("Hard downward shift for date text (px). Applied at runtime even when old Inspector values linger.")]
+    [SerializeField] private float _aowTimesForceDownPx = 26f;
     /// <summary>Extra distance down from the computed inset, in cm (uses screen DPI). 0 = none.</summary>
     [SerializeField] private float _aowTimesExtraDownCm = 0f;
     [Tooltip("Inset from the physical bottom edge (~cm).")]
@@ -322,7 +363,7 @@ public class PlanningShellController : MonoBehaviour
     [Tooltip("Inset from the physical right edge (~cm). AoW turn strip anchors bottom-right to this margin.")]
     [SerializeField] private float _aowRightMarginCm = 4.5f;
     [Tooltip("Portrait cluster anchor nudge from bottom-right (px). More negative X = further left; +Y lifts (reduces bottom clip). Turn strip follows automatically to the left.")]
-    [SerializeField] private Vector2 _aowPortraitClusterOffset = new Vector2(-20f, 52f);
+    [SerializeField] private Vector2 _aowPortraitClusterOffset = new Vector2(-14f, 48f);
     [Tooltip("Extra height on the portrait cluster rect so the ring/radials can extend above the BottomBar without clipping.")]
     [SerializeField] private float _aowPortraitClusterExtraHeightPx = 56f;
     [Tooltip("Extra pixels allowed when fitting the ring vs BottomBar height (larger portrait without clipping the bottom).")]
@@ -341,6 +382,8 @@ public class PlanningShellController : MonoBehaviour
     private Button _endTurnButton;
     private TextMeshProUGUI _aowTimeLabel;
     private RectTransform _aowTimesRect;
+    private RectTransform _aowTimesSlotRt;
+    private RectTransform _aowNextTurnSlotRt;
     private RectTransform _aowTurnStripRt;
     private RectTransform _aowPortraitClusterRt;
     private RectTransform _aowPortraitRingRt;
@@ -389,6 +432,7 @@ public class PlanningShellController : MonoBehaviour
         // PlanningScene: MainArea has a full-rect background Image with raycastTarget on. That steals UI hits
         // in gaps / when child sorting is ambiguous — crew rows never receive clicks. Children handle their own hits.
         DisableMainAreaBackgroundRaycast(mainArea.gameObject);
+        ApplyMainAreaBackgroundSkin(mainArea.gameObject);
 
         if (GameSessionState.CityMapSeed == 0)
             GameSessionState.CityMapSeed = Random.Range(1, int.MaxValue);
@@ -430,6 +474,60 @@ public class PlanningShellController : MonoBehaviour
         GameSessionState.ApplyBossCustodyLegalPhaseFromTrialFlag();
     }
 
+#if UNITY_EDITOR
+    [ContextMenu("Build HUD In Editor")]
+    private void BuildHudInEditor()
+    {
+        if (Application.isPlaying)
+            return;
+        EnsureRootCanvasScale();
+        EnsurePlanningCanvasScaler();
+        ApplyBottomBarLayoutAndSkin();
+        RectTransform mainArea = GameObject.Find("MainArea")?.GetComponent<RectTransform>();
+        if (mainArea != null)
+        {
+            DisableMainAreaBackgroundRaycast(mainArea.gameObject);
+            ApplyMainAreaBackgroundSkin(mainArea.gameObject);
+        }
+        BuildAoWCharacterHud();
+        SyncAoWTurnStripToBottomBar();
+        BuildInstitutionDock();
+        RectTransform bb = GameObject.Find("BottomBar")?.GetComponent<RectTransform>();
+        if (bb != null)
+            LayoutRebuilder.ForceRebuildLayoutImmediate(bb);
+        EditorUtility.SetDirty(gameObject);
+        if (gameObject.scene.IsValid())
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+    }
+
+    [ContextMenu("Clear HUD Preview")]
+    private void ClearHudPreviewInEditor()
+    {
+        if (Application.isPlaying)
+            return;
+        Transform canvasTf = GameObject.Find("Canvas")?.transform;
+        if (canvasTf != null)
+        {
+            Transform legacyHud = canvasTf.Find("AoWCharacterHud");
+            if (legacyHud != null)
+                DestroyObjectSafe(legacyHud.gameObject);
+        }
+        RectTransform bottomBar = GameObject.Find("BottomBar")?.GetComponent<RectTransform>();
+        if (bottomBar != null)
+        {
+            Transform onBar = bottomBar.Find("AoWCharacterHud");
+            if (onBar != null)
+                DestroyObjectSafe(onBar.gameObject);
+            Transform dock = bottomBar.Find(InstitutionDockName);
+            if (dock != null)
+                DestroyObjectSafe(dock.gameObject);
+        }
+        EditorUtility.SetDirty(gameObject);
+        if (gameObject.scene.IsValid())
+            EditorSceneManager.MarkSceneDirty(gameObject.scene);
+    }
+#endif
+
     private void BuildAoWCharacterHud()
     {
         if (!_enableAoWCharacterHud)
@@ -444,12 +542,12 @@ public class PlanningShellController : MonoBehaviour
         {
             Transform legacyHud = canvasTf.Find("AoWCharacterHud");
             if (legacyHud != null)
-                Destroy(legacyHud.gameObject);
+                DestroyObjectSafe(legacyHud.gameObject);
         }
 
         Transform existingOnBar = bottomBar.Find("AoWCharacterHud");
         if (existingOnBar != null)
-            Destroy(existingOnBar.gameObject);
+            DestroyObjectSafe(existingOnBar.gameObject);
 
         _aowHudRoot = new GameObject("AoWCharacterHud", typeof(RectTransform));
         _aowHudRoot.transform.SetParent(bottomBar.transform, false);
@@ -496,35 +594,20 @@ public class PlanningShellController : MonoBehaviour
             headerTmp.margin = new Vector4(14f, 0f, 14f, 0f);
         }
 
-        // Turn strip (bottom-right): Times + Next Turn only — positioned independently from PortraitCluster.
+        // Turn controls root (manual): TimesSlot + NextTurnSlot use explicit anchored positions.
         GameObject stripGo = new GameObject("TurnStrip", typeof(RectTransform));
         stripGo.transform.SetParent(_aowHudRoot.transform, false);
         RectTransform stripRt = stripGo.GetComponent<RectTransform>();
-        stripRt.anchorMin = new Vector2(1f, 0f);
-        stripRt.anchorMax = new Vector2(1f, 0f);
-        stripRt.pivot = new Vector2(1f, 0f);
-        stripRt.sizeDelta = new Vector2(_aowTurnStripSize.x, _aowTurnStripSize.y);
+        StretchFull(stripRt);
         _aowTurnStripRt = stripRt;
-
-        HorizontalLayoutGroup h = stripGo.AddComponent<HorizontalLayoutGroup>();
-        h.childAlignment = TextAnchor.LowerRight;
-        h.childControlWidth = false;
-        h.childControlHeight = false;
-        h.childForceExpandWidth = false;
-        h.childForceExpandHeight = false;
-        h.spacing = _aowTurnStripGap;
-        h.padding = new RectOffset(0, 0, 0, 0);
-        // LTR within strip: Times (date) → Next Turn (icon). Whole strip sits left of PortraitCluster → screen order: … date | next | portrait.
-        h.reverseArrangement = false;
 
         // Times / date (left side of strip).
         GameObject timeSlot = new GameObject("TimesSlot", typeof(RectTransform));
         timeSlot.transform.SetParent(stripGo.transform, false);
+        RectTransform timeSlotRt = timeSlot.GetComponent<RectTransform>();
+        _aowTimesSlotRt = timeSlotRt;
         LayoutElement timeLe = timeSlot.AddComponent<LayoutElement>();
-        timeLe.preferredWidth = 220f;
-        timeLe.minWidth = 220f;
-        timeLe.preferredHeight = _aowTurnStripSize.y;
-        timeLe.minHeight = _aowTurnStripSize.y;
+        timeLe.ignoreLayout = true;
 
         GameObject timeGo = new GameObject("Times", typeof(RectTransform));
         timeGo.transform.SetParent(timeSlot.transform, false);
@@ -550,12 +633,18 @@ public class PlanningShellController : MonoBehaviour
         // Next Turn (right side of strip, next to portrait).
         GameObject nextTurnSlot = new GameObject("NextTurnSlot", typeof(RectTransform));
         nextTurnSlot.transform.SetParent(stripGo.transform, false);
+        RectTransform nextTurnSlotRt = nextTurnSlot.GetComponent<RectTransform>();
+        _aowNextTurnSlotRt = nextTurnSlotRt;
         LayoutElement nextTurnLe = nextTurnSlot.AddComponent<LayoutElement>();
-        nextTurnLe.preferredHeight = _aowTurnStripSize.y;
-        nextTurnLe.minHeight = _aowTurnStripSize.y;
+        nextTurnLe.ignoreLayout = true;
+        nextTurnLe.preferredWidth = _aowNextTurnSlotSize.x;
+        nextTurnLe.minWidth = _aowNextTurnSlotSize.x;
+        nextTurnLe.preferredHeight = _aowNextTurnSlotSize.y;
+        nextTurnLe.minHeight = _aowNextTurnSlotSize.y;
 
         Button nextTurnRect = CreateAoWNextTurnControl(nextTurnSlot.transform, nextTurnLe);
         nextTurnRect.onClick.AddListener(() => InvokePlanningEndTurnFromUi());
+        ApplyAoWTurnStripAnchoredPosition();
 
         float stripHForPortrait = _aowTurnStripSize.y;
         if (bottomBar.rect.height > 1f)
@@ -734,12 +823,31 @@ public class PlanningShellController : MonoBehaviour
         // Keep a reference to the rect "Next Turn" button as the canonical next-turn action.
         _aowNextTurnButton = nextTurnRect;
 
-        // Portrait + radials stay rightmost above the bar; ensure sibling order matches (turn strip is child 0).
+        // Portrait above TurnStrip (times/date), but Next Turn above portrait — without nested Canvas (nested Canvas broke Scene layout).
         portraitClusterGo.transform.SetAsLastSibling();
+        if (_aowNextTurnSlotRt != null && _aowHudRoot != null)
+        {
+            _aowNextTurnSlotRt.SetParent(_aowHudRoot.transform, false);
+            _aowNextTurnSlotRt.SetAsLastSibling();
+        }
 
         ApplyAoWPortraitFitToStrip(stripHForPortrait);
         ApplyAoWPortraitClusterAnchoredPosition();
         ApplyAoWTurnStripAnchoredPosition();
+    }
+
+    private static void DestroyObjectSafe(Object obj)
+    {
+        if (obj == null)
+            return;
+#if UNITY_EDITOR
+        if (!Application.isPlaying)
+        {
+            Object.DestroyImmediate(obj);
+            return;
+        }
+#endif
+        Object.Destroy(obj);
     }
 
     private Button CreateAoWNextTurnControl(Transform nextTurnSlotTransform, LayoutElement nextTurnLe)
@@ -751,11 +859,11 @@ public class PlanningShellController : MonoBehaviour
             nextTurnLe.minWidth = 158f;
             Button fallback = CreateAoWRectButton(nextTurnSlotTransform, "Next Turn");
             RectTransform frt = fallback.GetComponent<RectTransform>();
-            frt.anchorMin = new Vector2(0.5f, 0f);
-            frt.anchorMax = new Vector2(0.5f, 0f);
-            frt.pivot = new Vector2(0.5f, 0f);
+            frt.anchorMin = new Vector2(0.5f, 0.5f);
+            frt.anchorMax = new Vector2(0.5f, 0.5f);
+            frt.pivot = new Vector2(0.5f, 0.5f);
             frt.sizeDelta = new Vector2(154f, 46f);
-            frt.anchoredPosition = new Vector2(_aowTurnControlsXOffset, _aowTurnControlsYOffset);
+            frt.anchoredPosition = Vector2.zero;
             return fallback;
         }
 
@@ -778,11 +886,11 @@ public class PlanningShellController : MonoBehaviour
         GameObject go = new GameObject("NextTurnBtn", typeof(RectTransform));
         go.transform.SetParent(nextTurnSlotTransform, false);
         RectTransform rt = go.GetComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0.5f, 0f);
-        rt.anchorMax = new Vector2(0.5f, 0f);
-        rt.pivot = new Vector2(0.5f, 0f);
+        rt.anchorMin = new Vector2(0.5f, 0.5f);
+        rt.anchorMax = new Vector2(0.5f, 0.5f);
+        rt.pivot = new Vector2(0.5f, 0.5f);
         rt.sizeDelta = new Vector2(w, h);
-        rt.anchoredPosition = new Vector2(_aowTurnControlsXOffset, _aowTurnControlsYOffset);
+        rt.anchoredPosition = Vector2.zero;
 
         Image img = go.AddComponent<Image>();
         img.sprite = spr;
@@ -927,7 +1035,14 @@ public class PlanningShellController : MonoBehaviour
         PlayerCharacterProfile p = PlayerRunState.Character;
         if (p != null && !string.IsNullOrWhiteSpace(p.PortraitResourcePath))
             key = p.PortraitResourcePath.Trim();
-        return DealerPortraitNaming.LoadPortraitTexture(key);
+        Texture2D tex = DealerPortraitNaming.LoadPortraitTexture(key);
+        if (tex != null)
+            return tex;
+        // Hard fallback so portrait never renders as a white disk when profile mapping fails.
+        tex = Resources.Load<Texture2D>("BossPortrait");
+        if (tex != null)
+            return tex;
+        return Resources.Load<Texture2D>("BagPortrait");
     }
 
     private static Sprite TryLoadHudSprite(string resourcesPathNoExt)
@@ -1046,6 +1161,7 @@ public class PlanningShellController : MonoBehaviour
     }
 
     private const string BottomBarWoodSpritePath = "UI/Chrome/bottom_bar_wood";
+    private const string MainAreaBackgroundSpritePath = "UI/Chrome/main";
     private const string TopTabsBarWoodSpritePath = "UI/Chrome/up_bottom_bar_wood";
     /// <summary>Per-tab button art (filename as authored: up_botton_wood.png).</summary>
     private const string TopTabButtonSpritePath = "UI/Chrome/up_botton_wood";
@@ -1232,6 +1348,8 @@ public class PlanningShellController : MonoBehaviour
     {
         RefreshPrisonAlertPulse();
         TryOpsMapScrollZoom();
+        if (_codexModalRoot != null && _codexModalRoot.activeSelf && Input.GetKeyDown(KeyCode.Escape))
+            HideCodexBook();
     }
 
     private void LateUpdate()
@@ -1242,7 +1360,7 @@ public class PlanningShellController : MonoBehaviour
         ApplyAoWTimesLayoutNow();
     }
 
-    /// <summary>Match TurnStrip height to BottomBar so the date block uses the same vertical band as the wood texture (gold lines).</summary>
+    /// <summary>Refresh portrait fitting + manual slot placement after BottomBar size settles.</summary>
     private void SyncAoWTurnStripToBottomBar()
     {
         if (!_enableAoWCharacterHud || _aowTurnStripRt == null)
@@ -1254,23 +1372,6 @@ public class PlanningShellController : MonoBehaviour
         if (h < 1f)
             h = Mathf.Max(80f, _bottomBarSizeDelta.y);
         h = Mathf.Max(80f, h);
-        Vector2 sd = _aowTurnStripRt.sizeDelta;
-        _aowTurnStripRt.sizeDelta = new Vector2(sd.x, h);
-
-        foreach (Transform child in _aowTurnStripRt)
-        {
-            LayoutElement le = child.GetComponent<LayoutElement>();
-            if (le == null)
-                continue;
-            switch (child.name)
-            {
-                case "TimesSlot":
-                case "NextTurnSlot":
-                    le.preferredHeight = h;
-                    le.minHeight = h;
-                    break;
-            }
-        }
 
         if (_aowPortraitClusterRt != null)
         {
@@ -1297,10 +1398,7 @@ public class PlanningShellController : MonoBehaviour
         ApplyAoWTimesLayoutNow();
     }
 
-    /// <summary>
-    /// Times + Next strip: placed so its right edge sits just left of the portrait cluster (order: date | next | portrait).
-    /// Call after <see cref="ApplyAoWPortraitClusterAnchoredPosition"/>; uses cluster width + gap.
-    /// </summary>
+    /// <summary>Manual placement for turn controls slots (matches runtime tuning from Inspector).</summary>
     private void ApplyAoWTurnStripAnchoredPosition()
     {
         if (_aowTurnStripRt == null)
@@ -1309,26 +1407,74 @@ public class PlanningShellController : MonoBehaviour
         if (dpi <= 1f)
             dpi = Mathf.Max(24f, _aowFallbackDpi);
         float cmToPx = 0.3937008f * dpi;
-        float rightPx = _aowRightMarginCm * cmToPx;
-        float bottomPx = _aowBottomMarginCm * cmToPx;
-        float stripY = bottomPx + _aowHudOffset.y;
-
-        if (_aowPortraitClusterRt != null)
+        float timesRightPx = Mathf.Max(0f, _aowTimesNudgeRightCm) * cmToPx;
+        float timesUpPx = _aowTimesNudgeUpCm * cmToPx;
+        float nextTurnRightPx = Mathf.Max(0f, _aowNextTurnNudgeRightCm) * cmToPx;
+        float nextTurnUpPx = Mathf.Max(0f, _aowNextTurnNudgeUpCm) * cmToPx;
+        if (_aowTimesSlotRt != null)
         {
-            float portraitW = _aowPortraitClusterRt.rect.width > 2f
-                ? _aowPortraitClusterRt.rect.width
-                : Mathf.Max(40f, _aowPortraitClusterRt.sizeDelta.x);
-            if (_aowPortraitSlotLe != null)
-                portraitW = Mathf.Max(portraitW, _aowPortraitSlotLe.preferredWidth);
-            float pax = _aowPortraitClusterRt.anchoredPosition.x;
-            float portraitLeftX = pax - portraitW;
-            float gap = Mathf.Max(8f, _aowNextTurnPortraitGapPx);
-            float stripX = portraitLeftX - gap + _aowHudOffset.x;
-            _aowTurnStripRt.anchoredPosition = new Vector2(stripX, stripY);
-            return;
+            _aowTimesSlotRt.anchorMin = new Vector2(0f, 1f);
+            _aowTimesSlotRt.anchorMax = new Vector2(0f, 1f);
+            _aowTimesSlotRt.pivot = new Vector2(0.5f, 0.5f);
+            _aowTimesSlotRt.sizeDelta = _aowTimesSlotSize;
+            _aowTimesSlotRt.anchoredPosition = _aowTimesSlotAnchoredPosition + _aowHudOffset + new Vector2(timesRightPx, timesUpPx);
         }
+        if (_aowNextTurnSlotRt != null)
+        {
+            _aowNextTurnSlotRt.sizeDelta = _aowNextTurnSlotSize;
+            _aowNextTurnSlotRt.pivot = new Vector2(0.5f, 0.5f);
+            float nextY = _aowNextTurnSlotAnchoredPosition.y + _aowHudOffset.y + nextTurnUpPx;
+            bool didSnap = false;
+            if (_aowNextTurnSnapLeftOfPortrait && _aowPortraitClusterRt != null && _aowHudRoot != null)
+            {
+                RectTransform hudRt = _aowHudRoot.GetComponent<RectTransform>();
+                if (hudRt != null && TryComputeNextTurnAnchoredSnapToPortrait(hudRt, out Vector2 snapPos))
+                {
+                    _aowNextTurnSlotRt.anchorMin = new Vector2(0.5f, 0.5f);
+                    _aowNextTurnSlotRt.anchorMax = new Vector2(0.5f, 0.5f);
+                    _aowNextTurnSlotRt.anchoredPosition = snapPos;
+                    didSnap = true;
+                }
+            }
+            if (!didSnap)
+            {
+                if (_aowNextTurnLayoutFromStripRight)
+                {
+                    // Anchor top-right of AoW (same as strip): negative X moves the slot left from the bottom bar's right edge.
+                    // Do not add nextTurnRightPx here — _aowNextTurnNudgeRightCm converts to ~37 px per cm and values like 15 cm
+                    // wipe out -_aowNextTurnCenterXPxFromStripRight, flipping X positive and floating the control off-screen right.
+                    _aowNextTurnSlotRt.anchorMin = new Vector2(1f, 1f);
+                    _aowNextTurnSlotRt.anchorMax = new Vector2(1f, 1f);
+                    float fromRight = -_aowNextTurnCenterXPxFromStripRight + _aowHudOffset.x + _aowNextTurnExtraOffsetXPx;
+                    _aowNextTurnSlotRt.anchoredPosition = new Vector2(fromRight, nextY);
+                }
+                else
+                {
+                    _aowNextTurnSlotRt.anchorMin = new Vector2(0f, 1f);
+                    _aowNextTurnSlotRt.anchorMax = new Vector2(0f, 1f);
+                    _aowNextTurnSlotRt.anchoredPosition =
+                        _aowNextTurnSlotAnchoredPosition + _aowHudOffset + new Vector2(nextTurnRightPx + _aowNextTurnExtraOffsetXPx, nextTurnUpPx);
+                }
+            }
+        }
+    }
 
-        _aowTurnStripRt.anchoredPosition = new Vector2(-rightPx + _aowHudOffset.x, stripY);
+    /// <summary>
+    /// Places Next Turn centered horizontally so its right side stays left of the portrait’s left edge (prevents overlap when portrait moves).
+    /// Uses bounds in AoW root space; requires both under the same parent <see cref="_aowHudRoot"/>.
+    /// </summary>
+    private bool TryComputeNextTurnAnchoredSnapToPortrait(RectTransform hudRt, out Vector2 anchoredPosition)
+    {
+        anchoredPosition = default;
+        if (_aowPortraitClusterRt == null || hudRt == null)
+            return false;
+        Bounds pb = RectTransformUtility.CalculateRelativeRectTransformBounds(hudRt.transform, _aowPortraitClusterRt.transform);
+        float gap = Mathf.Max(4f, _aowNextTurnPortraitGapPx);
+        float halfW = _aowNextTurnSlotSize.x * 0.5f;
+        float cx = pb.min.x - gap - halfW;
+        float cy = pb.center.y + _aowNextTurnSnapVerticalOffsetPx;
+        anchoredPosition = new Vector2(cx, cy);
+        return true;
     }
 
     /// <summary>Portrait cluster (ring + radials): anchor nudge from bottom-right; turn strip follows on X.</summary>
@@ -1342,9 +1488,11 @@ public class PlanningShellController : MonoBehaviour
         float cmToPx = 0.3937008f * dpi;
         float rightPx = _aowRightMarginCm * cmToPx;
         float bottomPx = _aowBottomMarginCm * cmToPx;
+        float portraitRightPx = Mathf.Max(0f, _aowPortraitNudgeRightCm) * cmToPx;
+        float portraitDownPx = Mathf.Max(0f, _aowPortraitNudgeDownCm) * cmToPx;
         _aowPortraitClusterRt.anchoredPosition = new Vector2(
-            -rightPx + _aowPortraitClusterOffset.x,
-            bottomPx + _aowPortraitClusterOffset.y);
+            -rightPx + _aowPortraitClusterOffset.x + portraitRightPx,
+            bottomPx + _aowPortraitClusterOffset.y - portraitDownPx);
     }
 
     /// <summary>
@@ -1412,7 +1560,8 @@ public class PlanningShellController : MonoBehaviour
             return;
         float dpi = Screen.dpi > 1f ? Screen.dpi : Mathf.Max(24f, _aowFallbackDpi);
         float extraDownPx = _aowTimesExtraDownCm * 0.3937008f * dpi;
-        float y = _aowTimesTopInsetPx + extraDownPx;
+        // Hard runtime lift so date text visibly moves up even if scene has stale serialized offsets.
+        float y = _aowTimesTopInsetPx + extraDownPx - _aowTimesForceDownPx + 24f;
         float x = _aowTurnControlsXOffset + _aowTimesXOffset;
         _aowTimesRect.anchorMin = new Vector2(1f, 0.5f);
         _aowTimesRect.anchorMax = new Vector2(1f, 0.5f);
@@ -1432,6 +1581,65 @@ public class PlanningShellController : MonoBehaviour
         Image bg = mainAreaGo.GetComponent<Image>();
         if (bg != null)
             bg.raycastTarget = false;
+    }
+
+    /// <summary>Fill center area with black + optional chrome image (Resources/UI/Chrome/main).</summary>
+    private static void ApplyMainAreaBackgroundSkin(GameObject mainAreaGo)
+    {
+        if (mainAreaGo == null)
+            return;
+        Image bg = mainAreaGo.GetComponent<Image>();
+        if (bg == null)
+            bg = mainAreaGo.AddComponent<Image>();
+        Sprite main = LoadMainAreaBackgroundSprite();
+        bg.sprite = main;
+        bg.color = main != null ? Color.white : Color.black;
+        bg.type = main != null && main.border.sqrMagnitude > 0.01f ? Image.Type.Sliced : Image.Type.Simple;
+        bg.preserveAspect = false;
+        bg.raycastTarget = false;
+    }
+
+    private static Sprite LoadMainAreaBackgroundSprite()
+    {
+        // `main.png` is imported as Multiple in this project, so prefer exact slices first.
+        Sprite[] mainSlices = Resources.LoadAll<Sprite>(MainAreaBackgroundSpritePath);
+        if (mainSlices != null && mainSlices.Length > 0)
+        {
+            Sprite best = mainSlices[0];
+            float bestArea = best.rect.width * best.rect.height;
+            for (int i = 1; i < mainSlices.Length; i++)
+            {
+                Sprite slice = mainSlices[i];
+                if (slice == null)
+                    continue;
+                float area = slice.rect.width * slice.rect.height;
+                if (area > bestArea)
+                {
+                    best = slice;
+                    bestArea = area;
+                }
+            }
+            return best;
+        }
+
+        Sprite s = TryLoadHudSprite(MainAreaBackgroundSpritePath);
+        if (s != null)
+            return s;
+        s = TryLoadHudSprite("UI/Chrome/Main");
+        if (s != null)
+            return s;
+
+        Texture2D t = Resources.Load<Texture2D>(MainAreaBackgroundSpritePath);
+        if (t == null)
+            t = Resources.Load<Texture2D>("UI/Chrome/Main");
+        if (t == null)
+            t = Resources.Load<Texture2D>("MainMenuBackground");
+        if (t == null)
+        {
+            Debug.LogWarning("PlanningShellController: missing Resources/UI/Chrome/main.png (or Main.png).");
+            return null;
+        }
+        return Sprite.Create(t, new Rect(0, 0, t.width, t.height), new Vector2(0.5f, 0.5f), 100f);
     }
 
     /// <summary>
@@ -1659,7 +1867,7 @@ public class PlanningShellController : MonoBehaviour
             tmp.alignment = TextAlignmentOptions.Center;
             tmp.color = PlanningUiButtonStyle.LabelPrimary;
             tmp.raycastTarget = false;
-            tmp.enableWordWrapping = false;
+            tmp.textWrappingMode = TextWrappingModes.NoWrap;
             tmp.overflowMode = TextOverflowModes.Overflow;
             tmp.margin = new Vector4(3f, 2f, 3f, 2f);
 
@@ -1955,7 +2163,7 @@ public class PlanningShellController : MonoBehaviour
             codexLe.minHeight = 84f;
         }
         _legalCodexToggleButton.onClick.RemoveAllListeners();
-        _legalCodexToggleButton.onClick.AddListener(OpenCodexBook);
+        _legalCodexToggleButton.onClick.AddListener(ToggleLegalSidebarCodex);
         TryApplyCodexButtonArt(_legalCodexToggleButton);
         _legalCodexToggleButton.gameObject.SetActive(false);
 
@@ -2056,7 +2264,7 @@ public class PlanningShellController : MonoBehaviour
         bookColors.fadeDuration = 0.09f;
         _legalCodexBookButton.colors = bookColors;
         _legalCodexBookButton.onClick.RemoveAllListeners();
-        _legalCodexBookButton.onClick.AddListener(OpenCodexBook);
+        _legalCodexBookButton.onClick.AddListener(ToggleLegalSidebarCodex);
 
         // Press feel like our other buttons.
         ButtonPressScale press = bookGo.AddComponent<ButtonPressScale>();
@@ -2106,8 +2314,18 @@ public class PlanningShellController : MonoBehaviour
         BuildOpsCrewAssignModal();
     }
 
-    private void OpenCodexBook()
+    /// <summary>
+    /// Legal sidebar only: closed codex / Open Codex control. Opens the spread or closes if already open.
+    /// The modal open-book graphic does not wire this handler.
+    /// </summary>
+    private void ToggleLegalSidebarCodex()
     {
+        if (_codexModalRoot != null && _codexModalRoot.activeSelf)
+        {
+            HideCodexBook();
+            return;
+        }
+
         ShowCodexBookAtPage(0);
     }
 
@@ -2116,7 +2334,7 @@ public class PlanningShellController : MonoBehaviour
         if (_legalCodexBookImage == null)
             return;
 
-        Sprite book = LoadCodexBookSpriteForUi();
+        Sprite book = LoadCodexSidebarBookSprite();
         _legalCodexBookImage.sprite = book;
         bool show = book != null && _current == PlanningTabId.Legal;
         if (_legalCodexBookImage != null)
@@ -2130,36 +2348,27 @@ public class PlanningShellController : MonoBehaviour
         if (book == null && !_warnedMissingCodexBookSprite)
         {
             _warnedMissingCodexBookSprite = true;
-            Debug.LogWarning("[Codex] Book sprite not found. Tried Resources paths: " +
-                             CodexBookResourcePath + ", " +
-                             CodexBookResourcePath + "_0, " +
-                             "Street Codex (Black Ledger), Street Codex (Black Ledger)_0, " +
-                             CodexBookLegacyResourcePath + ", " +
-                             CodexBookLegacyResourcePath + "_0, " +
-                             "icon_codex_open_sheet, icon_codex_open_sheet_0. " +
-                             "Ensure the PNG is under Assets/Resources/UI/Icons/ and imported as Sprite.");
+            Debug.LogWarning("[Codex] Sidebar book sprite not found. Tried " + CodexSidebarBookResourcePath + ", " +
+                             CodexBookLegacyResourcePath +
+                             ". Ensure PNGs are under Assets/Resources/UI/Icons/ and imported as Sprite.");
         }
     }
 
-    private static Sprite LoadCodexBookSpriteForUi()
+    /// <summary>Small book on the Legal tab — same art as before the open-spread modal.</summary>
+    private static Sprite LoadCodexSidebarBookSprite()
     {
-        // Resources.Load is picky about path + import mode. Be defensive:
-        // - Sprite (Single): Resources.Load<Sprite>(basePath)
-        // - Sprite (Multiple): Resources.LoadAll<Sprite>(basePath) returns sub-sprites
-        // - Some imports only resolve by sub-sprite name (e.g. *_0)
-
-        string basePath = CodexBookResourcePath;
-        string fileNameOnly = "Street Codex (Black Ledger)";
+        string sidebarPath = CodexSidebarBookResourcePath;
+        string sidebarFileOnly = "Street Codex (Black Ledger)";
         string legacyBasePath = CodexBookLegacyResourcePath;
         string legacyFileNameOnly = "icon_codex_open_sheet";
         string[] candidates =
         {
-            basePath,
-            basePath + "_0",
-            fileNameOnly,
-            fileNameOnly + "_0",
-            "UI/Icons/" + fileNameOnly,
-            "UI/Icons/" + fileNameOnly + "_0",
+            sidebarPath,
+            sidebarPath + "_0",
+            sidebarFileOnly,
+            sidebarFileOnly + "_0",
+            "UI/Icons/" + sidebarFileOnly,
+            "UI/Icons/" + sidebarFileOnly + "_0",
             legacyBasePath,
             legacyBasePath + "_0",
             legacyFileNameOnly,
@@ -2168,14 +2377,42 @@ public class PlanningShellController : MonoBehaviour
             "UI/Icons/" + legacyFileNameOnly + "_0"
         };
 
+        return LoadCodexSpriteFromResourceCandidates(candidates);
+    }
+
+    /// <summary>Full modal background: open spread first, then same fallback as sidebar.</summary>
+    private static Sprite LoadCodexModalOpenBookSprite()
+    {
+        string openPath = CodexModalOpenBookResourcePath;
+        string openFileOnly = "Street Codex_Open";
+        string[] openCandidates =
+        {
+            openPath,
+            openPath + "_0",
+            openFileOnly,
+            openFileOnly + "_0",
+            "UI/Icons/" + openFileOnly,
+            "UI/Icons/" + openFileOnly + "_0"
+        };
+
+        Sprite s = LoadCodexSpriteFromResourceCandidates(openCandidates);
+        if (s != null)
+            return s;
+        return LoadCodexSidebarBookSprite();
+    }
+
+    private static Sprite LoadCodexSpriteFromResourceCandidates(string[] candidates)
+    {
+        if (candidates == null || candidates.Length == 0)
+            return null;
+
         for (int i = 0; i < candidates.Length; i++)
         {
-            Sprite s = Resources.Load<Sprite>(candidates[i]);
-            if (s != null)
-                return s;
+            Sprite sp = Resources.Load<Sprite>(candidates[i]);
+            if (sp != null)
+                return sp;
         }
 
-        // Multiple sprites: try base path variants.
         for (int i = 0; i < candidates.Length; i++)
         {
             Sprite[] all = Resources.LoadAll<Sprite>(candidates[i]);
@@ -2207,7 +2444,7 @@ public class PlanningShellController : MonoBehaviour
             return;
 
         // Expect a sprite (single) or multiple sprites imported under Resources.
-        Sprite book = LoadCodexBookSpriteForUi();
+        Sprite book = LoadCodexSidebarBookSprite();
         if (book == null)
             return;
 
@@ -2245,11 +2482,51 @@ public class PlanningShellController : MonoBehaviour
             "The codex is the rulebook that powers arrests, charges, and sentencing.\n\n" +
             "• Primary charge dropped -> case dismissed\n" +
             "• Bonus charge dropped -> sentence mitigation\n\n" +
-            "<i>Use the button on the left to open the codex book.</i>";
+            "<i>Open the codex from the <b>closed book button</b> in the sidebar; turn pages with Prev/Next under the spread. " +
+            "Close with Esc, click outside the spread, or press that same <b>sidebar</b> book button again.</i>";
         _rightText.text =
             "<b>Quick note</b>\n" +
             "Penalties are ranges (min–max) so judges and lawyers have room to work.\n\n" +
             "<size=90%><i>Next:</i> link each arrest cause to codex sections for full integration.</i></size>";
+    }
+
+    /// <summary>
+    /// Dimmer and book panel start to the <em>right</em> of the planning left column so the
+    /// <b>closed</b> sidebar book stays clickable (same <see cref="ToggleLegalSidebarCodex"/> as open).
+    /// </summary>
+    private void ApplyCodexModalLeftSidebarInset()
+    {
+        if (_codexDimDismissRt == null || _codexPanelRt == null)
+            return;
+
+        TryRecoverPlanningShellReferencesFromHierarchy();
+        float leftGutter = 280f;
+        if (_leftColumnRoot != null)
+        {
+            Canvas.ForceUpdateCanvases();
+            var lr = _leftColumnRoot as RectTransform;
+            if (lr != null)
+            {
+                leftGutter = lr.rect.width + CodexLeftSidebarExtraGutterPx;
+                leftGutter = Mathf.Clamp(leftGutter, 220f, 420f);
+            }
+        }
+
+        _codexDimDismissRt.offsetMin = new Vector2(leftGutter, 0f);
+        _codexDimDismissRt.offsetMax = Vector2.zero;
+
+        float maxW = Mathf.Max(180f, Screen.width * 0.985f - leftGutter - 16f);
+        float maxH = Screen.height * 0.92f;
+        float aspect = Mathf.Max(0.5f, _codexOpenBookAspect);
+        float hFromW = maxW / aspect;
+        float panelH = hFromW <= maxH ? hFromW : maxH;
+        float panelW = panelH * aspect;
+        if (hFromW > maxH)
+            panelW = maxH * aspect;
+
+        _codexPanelRt.sizeDelta = new Vector2(panelW, panelH);
+        // Shift spread center so it lives in the region to the right of the gutter.
+        _codexPanelRt.anchoredPosition = new Vector2(leftGutter * 0.5f, 0f);
     }
 
     private void BuildCodexBookModal()
@@ -2272,94 +2549,94 @@ public class PlanningShellController : MonoBehaviour
         root.SetActive(false);
         _codexModalRoot = root;
 
-        Image dim = root.AddComponent<Image>();
+        // Dimmer: separate child, inset from the left so the Legal sidebar (closed book) stays hit-testable.
+        GameObject dimGo = new GameObject("CodexDim");
+        dimGo.transform.SetParent(root.transform, false);
+        _codexDimDismissRt = dimGo.AddComponent<RectTransform>();
+        StretchFull(_codexDimDismissRt);
+        _codexDimDismissRt.SetAsFirstSibling();
+        Image dim = dimGo.AddComponent<Image>();
         dim.color = new Color(0f, 0f, 0f, 0.55f);
         dim.raycastTarget = true;
+        Button dimDismiss = dimGo.AddComponent<Button>();
+        dimDismiss.targetGraphic = dim;
+        dimDismiss.transition = Selectable.Transition.None;
+        dimDismiss.onClick.AddListener(HideCodexBook);
+
+        Sprite openSprite = LoadCodexModalOpenBookSprite();
+        if (openSprite != null && openSprite.rect.height > 1f)
+            _codexOpenBookAspect = openSprite.rect.width / openSprite.rect.height;
 
         GameObject panel = new GameObject("CodexPanel");
         panel.transform.SetParent(root.transform, false);
+        panel.transform.SetAsLastSibling();
         RectTransform prt = panel.AddComponent<RectTransform>();
         prt.anchorMin = new Vector2(0.5f, 0.5f);
         prt.anchorMax = new Vector2(0.5f, 0.5f);
         prt.pivot = new Vector2(0.5f, 0.5f);
-        prt.sizeDelta = new Vector2(Mathf.Min(980f, Screen.width * 0.92f), Mathf.Min(760f, Screen.height * 0.9f));
         _codexPanelRt = prt;
 
         Image pimg = panel.AddComponent<Image>();
-        pimg.color = new Color(0.11f, 0.12f, 0.15f, 0.99f);
-        pimg.raycastTarget = true;
-        Outline po = panel.AddComponent<Outline>();
-        po.effectColor = new Color(0.45f, 0.5f, 0.58f, 0.75f);
-        po.effectDistance = new Vector2(2f, -2f);
+        pimg.color = new Color(0f, 0f, 0f, 0f);
+        // Invisible; book art + scroll/TOC handle hits. Do not steal clicks over the (excluded) left sidebar.
+        pimg.raycastTarget = false;
 
-        GameObject titleGo = new GameObject("Title");
-        titleGo.transform.SetParent(panel.transform, false);
-        RectTransform trt = titleGo.AddComponent<RectTransform>();
-        trt.anchorMin = new Vector2(0f, 1f);
-        trt.anchorMax = new Vector2(1f, 1f);
-        trt.pivot = new Vector2(0.5f, 1f);
-        trt.anchoredPosition = new Vector2(0f, -16f);
-        trt.sizeDelta = new Vector2(-32f, 44f);
-        _codexTitleText = titleGo.AddComponent<TextMeshProUGUI>();
-        if (TMP_Settings.defaultFontAsset != null)
-            _codexTitleText.font = TMP_Settings.defaultFontAsset;
-        _codexTitleText.fontSize = 26f;
-        _codexTitleText.fontStyle = FontStyles.Bold;
-        _codexTitleText.alignment = TextAlignmentOptions.Center;
-        _codexTitleText.color = new Color(0.95f, 0.95f, 0.92f);
-        _codexTitleText.raycastTarget = true;
-        RegisterDraggableModalTitle(titleGo, prt);
+        ApplyCodexModalLeftSidebarInset();
 
-        // Body scroll
-        GameObject scrollGo = new GameObject("Scroll");
-        scrollGo.transform.SetParent(panel.transform, false);
-        RectTransform srt = scrollGo.AddComponent<RectTransform>();
-        srt.anchorMin = new Vector2(0f, 0f);
-        srt.anchorMax = new Vector2(1f, 1f);
-        srt.offsetMin = new Vector2(24f, 92f);
-        srt.offsetMax = new Vector2(-24f, -84f);
-        ScrollRect sr = scrollGo.AddComponent<ScrollRect>();
-        sr.horizontal = false;
+        // Open-book art (full bleed inside panel)
+        GameObject bookGo = new GameObject("CodexOpenBookArt");
+        bookGo.transform.SetParent(panel.transform, false);
+        RectTransform bookRt = bookGo.AddComponent<RectTransform>();
+        StretchFull(bookRt);
+        Image bookImg = bookGo.AddComponent<Image>();
+        bookImg.sprite = openSprite;
+        bookImg.preserveAspect = false;
+        bookImg.color = Color.white;
+        // Must block raycasts so clicks on parchment (outside scroll columns) don't fall through to the dim dismiss layer.
+        bookImg.raycastTarget = true;
 
-        GameObject viewport = new GameObject("Viewport");
-        viewport.transform.SetParent(scrollGo.transform, false);
-        RectTransform vrt = viewport.AddComponent<RectTransform>();
-        StretchFull(vrt);
-        Image vimg = viewport.AddComponent<Image>();
-        vimg.color = new Color(1f, 1f, 1f, 0.02f);
-        Mask mask = viewport.AddComponent<Mask>();
-        mask.showMaskGraphic = false;
-        sr.viewport = vrt;
+        // Two-page text area (inset for leather frame + spine)
+        GameObject dockGo = new GameObject("PagesDock");
+        dockGo.transform.SetParent(panel.transform, false);
+        RectTransform dockRt = dockGo.AddComponent<RectTransform>();
+        // Inset text from printed page edges; leave bottom band for Prev/Next.
+        dockRt.anchorMin = new Vector2(0.095f, 0.15f);
+        dockRt.anchorMax = new Vector2(0.905f, 0.86f);
+        dockRt.offsetMin = Vector2.zero;
+        dockRt.offsetMax = Vector2.zero;
 
-        GameObject content = new GameObject("Content");
-        content.transform.SetParent(viewport.transform, false);
-        RectTransform crt = content.AddComponent<RectTransform>();
-        crt.anchorMin = new Vector2(0f, 1f);
-        crt.anchorMax = new Vector2(1f, 1f);
-        crt.pivot = new Vector2(0.5f, 1f);
-        crt.anchoredPosition = Vector2.zero;
-        crt.sizeDelta = new Vector2(0f, 900f);
-        sr.content = crt;
+        HorizontalLayoutGroup hlg = dockGo.AddComponent<HorizontalLayoutGroup>();
+        hlg.spacing = 0f;
+        hlg.padding = new RectOffset(0, 0, 0, 0);
+        hlg.childAlignment = TextAnchor.UpperLeft;
+        hlg.childControlWidth = true;
+        hlg.childControlHeight = true;
+        hlg.childForceExpandWidth = true;
+        hlg.childForceExpandHeight = true;
 
-        VerticalLayoutGroup cv = content.AddComponent<VerticalLayoutGroup>();
-        cv.childAlignment = TextAnchor.UpperLeft;
-        cv.childControlWidth = true;
-        cv.childControlHeight = false;
-        cv.childForceExpandWidth = true;
-        cv.childForceExpandHeight = false;
-        cv.spacing = 10f;
+        GameObject leftCol = new GameObject("LeftPage");
+        leftCol.transform.SetParent(dockGo.transform, false);
+        LayoutElement leL = leftCol.AddComponent<LayoutElement>();
+        leL.flexibleWidth = 1f;
+        leL.flexibleHeight = 1f;
+        BuildCodexScrollPageColumn(leftCol.transform, "LeftScroll", out _codexLeftPageText);
 
-        ContentSizeFitter fitter = content.AddComponent<ContentSizeFitter>();
-        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        GameObject rightCol = new GameObject("RightPage");
+        rightCol.transform.SetParent(dockGo.transform, false);
+        LayoutElement leR = rightCol.AddComponent<LayoutElement>();
+        leR.flexibleWidth = 1f;
+        leR.flexibleHeight = 1f;
+        ScrollRect rightScroll = BuildCodexScrollPageColumn(rightCol.transform, "RightScroll", out _codexRightPageText);
+        RectTransform rightContent = rightScroll.content;
 
-        // TOC button list (page 0 only)
+        // TOC buttons: right-hand scroll, below the right page header text
         GameObject tocGo = new GameObject("TocButtons");
-        tocGo.transform.SetParent(content.transform, false);
+        tocGo.transform.SetParent(rightContent.transform, false);
         RectTransform tocRt = tocGo.AddComponent<RectTransform>();
         tocRt.sizeDelta = new Vector2(0f, 10f);
         VerticalLayoutGroup tocV = tocGo.AddComponent<VerticalLayoutGroup>();
-        tocV.spacing = 6f;
+        tocV.padding = new RectOffset(4, 10, 2, 4);
+        tocV.spacing = 2f;
         tocV.childAlignment = TextAnchor.UpperLeft;
         tocV.childControlWidth = true;
         tocV.childControlHeight = false;
@@ -2372,79 +2649,308 @@ public class PlanningShellController : MonoBehaviour
         for (int i = 0; i < tocTargets.Count; i++)
         {
             int capturedPage = tocTargets[i].pageIndex;
-            Button b = CreateBarButton(tocGo.transform, tocTargets[i].label);
-            RectTransform br = b.GetComponent<RectTransform>();
-            if (br != null)
-                br.sizeDelta = new Vector2(0f, 40f);
+            Button b = CreateCodexParchmentLinkRow(tocGo.transform, tocTargets[i].label);
             b.onClick.RemoveAllListeners();
             b.onClick.AddListener(() => ShowCodexBookAtPage(capturedPage));
             _codexTocButtons.Add(b);
         }
 
-        GameObject bodyGo = new GameObject("BodyText");
-        bodyGo.transform.SetParent(content.transform, false);
-        _codexBodyText = bodyGo.AddComponent<TextMeshProUGUI>();
+        // Title strip (draggable) — after dock so it draws above the page area
+        GameObject titleGo = new GameObject("Title");
+        titleGo.transform.SetParent(panel.transform, false);
+        RectTransform trt = titleGo.AddComponent<RectTransform>();
+        trt.anchorMin = new Vector2(0.08f, 1f);
+        trt.anchorMax = new Vector2(0.92f, 1f);
+        trt.pivot = new Vector2(0.5f, 1f);
+        trt.anchoredPosition = new Vector2(0f, -6f);
+        trt.sizeDelta = new Vector2(0f, 40f);
+        _codexTitleText = titleGo.AddComponent<TextMeshProUGUI>();
         if (TMP_Settings.defaultFontAsset != null)
-            _codexBodyText.font = TMP_Settings.defaultFontAsset;
-        _codexBodyText.fontSize = 18f;
-        _codexBodyText.alignment = TextAlignmentOptions.TopLeft;
-        _codexBodyText.textWrappingMode = TextWrappingModes.Normal;
-        _codexBodyText.color = new Color(0.82f, 0.84f, 0.88f, 1f);
-        _codexBodyText.text = "";
-        LayoutElement bodyLe = bodyGo.AddComponent<LayoutElement>();
-        bodyLe.flexibleWidth = 1f;
-        bodyLe.flexibleHeight = 1f;
+            _codexTitleText.font = TMP_Settings.defaultFontAsset;
+        _codexTitleText.fontSize = 22f;
+        _codexTitleText.fontStyle = FontStyles.Bold;
+        _codexTitleText.alignment = TextAlignmentOptions.Center;
+        _codexTitleText.color = new Color(0.18f, 0.13f, 0.09f, 0.95f);
+        _codexTitleText.raycastTarget = true;
+        RegisterDraggableModalTitle(titleGo, prt);
 
-        // Bottom nav (Prev/Next) + Close
-        GameObject navGo = new GameObject("NavRow");
+        // Page navigation (built in code — independent of book PNG artwork)
+        GameObject navGo = new GameObject("CodexPageNav");
         navGo.transform.SetParent(panel.transform, false);
-        RectTransform nrt = navGo.AddComponent<RectTransform>();
-        nrt.anchorMin = new Vector2(0f, 0f);
-        nrt.anchorMax = new Vector2(1f, 0f);
-        nrt.pivot = new Vector2(0.5f, 0f);
-        nrt.anchoredPosition = new Vector2(0f, 14f);
-        nrt.sizeDelta = new Vector2(-32f, 54f);
-        HorizontalLayoutGroup nh = navGo.AddComponent<HorizontalLayoutGroup>();
-        nh.spacing = 10f;
-        nh.childAlignment = TextAnchor.MiddleCenter;
-        nh.childControlWidth = false;
-        nh.childControlHeight = true;
-        nh.childForceExpandWidth = false;
-        nh.childForceExpandHeight = false;
+        RectTransform navRt = navGo.AddComponent<RectTransform>();
+        navRt.anchorMin = new Vector2(0.08f, 0.03f);
+        navRt.anchorMax = new Vector2(0.92f, 0.11f);
+        navRt.offsetMin = Vector2.zero;
+        navRt.offsetMax = Vector2.zero;
+        HorizontalLayoutGroup navH = navGo.AddComponent<HorizontalLayoutGroup>();
+        navH.padding = new RectOffset(8, 8, 2, 2);
+        navH.spacing = 12f;
+        navH.childAlignment = TextAnchor.MiddleCenter;
+        navH.childControlWidth = false;
+        navH.childControlHeight = true;
+        navH.childForceExpandWidth = false;
+        navH.childForceExpandHeight = false;
 
-        _codexPrevButton = CreateBarButton(navGo.transform, "Prev");
-        _codexPrevButton.onClick.RemoveAllListeners();
-        _codexPrevButton.onClick.AddListener(() => ShowCodexBookAtPage(_codexPageIndex - 1));
+        _codexPagePrevButton = CreateCodexParchmentNavButton(navGo.transform, "‹ Prev");
+        _codexPagePrevButton.onClick.RemoveAllListeners();
+        _codexPagePrevButton.onClick.AddListener(() => ShowCodexBookAtPage(_codexPageIndex - 1));
 
-        _codexNextButton = CreateBarButton(navGo.transform, "Next");
-        _codexNextButton.onClick.RemoveAllListeners();
-        _codexNextButton.onClick.AddListener(() => ShowCodexBookAtPage(_codexPageIndex + 1));
+        GameObject navSpacer = new GameObject("NavSpacer");
+        navSpacer.transform.SetParent(navGo.transform, false);
+        LayoutElement navSpLe = navSpacer.AddComponent<LayoutElement>();
+        navSpLe.flexibleWidth = 1f;
+        navSpLe.minWidth = 8f;
 
-        Button close = CreateBarButton(navGo.transform, "Close");
+        _codexPageNextButton = CreateCodexParchmentNavButton(navGo.transform, "Next ›");
+        _codexPageNextButton.onClick.RemoveAllListeners();
+        _codexPageNextButton.onClick.AddListener(() => ShowCodexBookAtPage(_codexPageIndex + 1));
+
+        GameObject closeGo = new GameObject("CodexClose");
+        closeGo.transform.SetParent(panel.transform, false);
+        RectTransform crtClose = closeGo.AddComponent<RectTransform>();
+        crtClose.anchorMin = new Vector2(1f, 1f);
+        crtClose.anchorMax = new Vector2(1f, 1f);
+        crtClose.pivot = new Vector2(1f, 1f);
+        crtClose.anchoredPosition = new Vector2(-10f, -8f);
+        crtClose.sizeDelta = new Vector2(120f, 36f);
+        Image closeImg = closeGo.AddComponent<Image>();
+        closeImg.color = new Color(0.42f, 0.28f, 0.16f, 0.14f);
+        closeImg.raycastTarget = true;
+        Outline closeOl = closeGo.AddComponent<Outline>();
+        closeOl.effectColor = new Color(0.22f, 0.14f, 0.09f, 0.4f);
+        closeOl.effectDistance = new Vector2(1f, -1f);
+        Button close = closeGo.AddComponent<Button>();
+        close.targetGraphic = closeImg;
+        close.transition = Selectable.Transition.ColorTint;
+        ColorBlock closeCb = close.colors;
+        closeCb.normalColor = Color.white;
+        closeCb.highlightedColor = new Color(1.06f, 0.98f, 0.92f, 1f);
+        closeCb.pressedColor = new Color(0.88f, 0.80f, 0.72f, 1f);
+        closeCb.selectedColor = Color.white;
+        closeCb.disabledColor = new Color(0.7f, 0.7f, 0.7f, 0.5f);
+        closeCb.fadeDuration = 0.07f;
+        close.colors = closeCb;
         close.onClick.RemoveAllListeners();
         close.onClick.AddListener(HideCodexBook);
+        GameObject closeLabel = new GameObject("Label");
+        closeLabel.transform.SetParent(closeGo.transform, false);
+        RectTransform clRt = closeLabel.AddComponent<RectTransform>();
+        StretchFull(clRt);
+        TextMeshProUGUI closeTmp = closeLabel.AddComponent<TextMeshProUGUI>();
+        if (TMP_Settings.defaultFontAsset != null)
+            closeTmp.font = TMP_Settings.defaultFontAsset;
+        closeTmp.text = "Close";
+        closeTmp.fontSize = 15f;
+        closeTmp.alignment = TextAlignmentOptions.Center;
+        closeTmp.color = new Color(0.14f, 0.09f, 0.06f, 0.9f);
+        closeTmp.raycastTarget = false;
+    }
+
+    /// <summary>TOC line: ink-on-parchment look; hover is a faint wash only (no black slab).</summary>
+    private static Button CreateCodexParchmentLinkRow(Transform parent, string label)
+    {
+        const float rowH = 40f;
+        GameObject go = new GameObject("CodexParchRow");
+        go.transform.SetParent(parent, false);
+        RectTransform rt = go.AddComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(0f, rowH);
+        LayoutElement le = go.AddComponent<LayoutElement>();
+        le.minHeight = rowH;
+        le.preferredHeight = rowH;
+        le.flexibleWidth = 1f;
+
+        Image bg = go.AddComponent<Image>();
+        bg.color = new Color(0.45f, 0.30f, 0.16f, 0.03f);
+        bg.raycastTarget = true;
+
+        Button btn = go.AddComponent<Button>();
+        btn.targetGraphic = bg;
+        btn.transition = Selectable.Transition.ColorTint;
+        ColorBlock cb = btn.colors;
+        cb.normalColor = Color.white;
+        cb.highlightedColor = new Color(1.12f, 1.02f, 0.92f, 1f);
+        cb.pressedColor = new Color(0.82f, 0.72f, 0.58f, 1f);
+        cb.selectedColor = Color.white;
+        cb.disabledColor = new Color(0.75f, 0.75f, 0.75f, 0.45f);
+        cb.fadeDuration = 0.07f;
+        btn.colors = cb;
+        btn.navigation = new Navigation { mode = Navigation.Mode.None };
+
+        GameObject textGo = new GameObject("Label");
+        textGo.transform.SetParent(go.transform, false);
+        RectTransform tr = textGo.AddComponent<RectTransform>();
+        tr.anchorMin = new Vector2(0f, 0f);
+        tr.anchorMax = new Vector2(1f, 1f);
+        tr.offsetMin = new Vector2(2f, 0f);
+        tr.offsetMax = new Vector2(-6f, 0f);
+        TextMeshProUGUI tmp = textGo.AddComponent<TextMeshProUGUI>();
+        if (TMP_Settings.defaultFontAsset != null)
+            tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.text = label;
+        tmp.fontSize = 15f;
+        tmp.fontStyle = FontStyles.Normal;
+        tmp.alignment = TextAlignmentOptions.MidlineLeft;
+        tmp.textWrappingMode = TextWrappingModes.Normal;
+        tmp.overflowMode = TextOverflowModes.Ellipsis;
+        tmp.color = new Color(0.14f, 0.09f, 0.055f, 0.94f);
+        tmp.raycastTarget = false;
+        if (go.GetComponent<ButtonPressScale>() == null)
+            go.AddComponent<ButtonPressScale>();
+        return btn;
+    }
+
+    /// <summary>Small parchment chip for Prev/Next — warm tint, not planning HUD black.</summary>
+    private static Button CreateCodexParchmentNavButton(Transform parent, string label)
+    {
+        GameObject go = new GameObject("CodexParchNav");
+        go.transform.SetParent(parent, false);
+        RectTransform rt = go.AddComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(128f, 34f);
+        LayoutElement le = go.AddComponent<LayoutElement>();
+        le.preferredWidth = 128f;
+        le.preferredHeight = 34f;
+        le.minWidth = 112f;
+
+        Image bg = go.AddComponent<Image>();
+        bg.color = new Color(0.40f, 0.26f, 0.14f, 0.16f);
+        bg.raycastTarget = true;
+        Outline ol = go.AddComponent<Outline>();
+        ol.effectColor = new Color(0.22f, 0.14f, 0.09f, 0.38f);
+        ol.effectDistance = new Vector2(1f, -1f);
+
+        Button btn = go.AddComponent<Button>();
+        btn.targetGraphic = bg;
+        btn.transition = Selectable.Transition.ColorTint;
+        ColorBlock cb = btn.colors;
+        cb.normalColor = Color.white;
+        cb.highlightedColor = new Color(1.08f, 0.98f, 0.90f, 1f);
+        cb.pressedColor = new Color(0.86f, 0.76f, 0.64f, 1f);
+        cb.selectedColor = Color.white;
+        cb.disabledColor = new Color(0.72f, 0.72f, 0.72f, 0.45f);
+        cb.fadeDuration = 0.07f;
+        btn.colors = cb;
+
+        GameObject textGo = new GameObject("Label");
+        textGo.transform.SetParent(go.transform, false);
+        RectTransform tr = textGo.AddComponent<RectTransform>();
+        StretchFull(tr);
+        TextMeshProUGUI tmp = textGo.AddComponent<TextMeshProUGUI>();
+        if (TMP_Settings.defaultFontAsset != null)
+            tmp.font = TMP_Settings.defaultFontAsset;
+        tmp.text = label;
+        tmp.fontSize = 15f;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color = new Color(0.13f, 0.085f, 0.055f, 0.95f);
+        tmp.raycastTarget = false;
+        if (go.GetComponent<ButtonPressScale>() == null)
+            go.AddComponent<ButtonPressScale>();
+        return btn;
+    }
+
+    /// <summary>One scroll column inside the open-book spread.</summary>
+    private static ScrollRect BuildCodexScrollPageColumn(Transform parent, string scrollName, out TextMeshProUGUI pageTmp)
+    {
+        GameObject scrollGo = new GameObject(scrollName);
+        scrollGo.transform.SetParent(parent, false);
+        RectTransform srt = scrollGo.AddComponent<RectTransform>();
+        StretchFull(srt);
+        LayoutElement sle = scrollGo.AddComponent<LayoutElement>();
+        sle.flexibleWidth = 1f;
+        sle.flexibleHeight = 1f;
+
+        ScrollRect sr = scrollGo.AddComponent<ScrollRect>();
+        sr.horizontal = false;
+        sr.vertical = true;
+        sr.movementType = ScrollRect.MovementType.Clamped;
+        sr.scrollSensitivity = 32f;
+
+        GameObject viewport = new GameObject("Viewport");
+        viewport.transform.SetParent(scrollGo.transform, false);
+        RectTransform vrt = viewport.AddComponent<RectTransform>();
+        StretchFull(vrt);
+        Image vimg = viewport.AddComponent<Image>();
+        vimg.color = new Color(1f, 1f, 1f, 0.02f);
+        vimg.raycastTarget = true;
+        Mask mask = viewport.AddComponent<Mask>();
+        mask.showMaskGraphic = false;
+        sr.viewport = vrt;
+
+        GameObject content = new GameObject("Content");
+        content.transform.SetParent(viewport.transform, false);
+        RectTransform crt = content.AddComponent<RectTransform>();
+        crt.anchorMin = new Vector2(0f, 1f);
+        crt.anchorMax = new Vector2(1f, 1f);
+        crt.pivot = new Vector2(0.5f, 1f);
+        crt.anchoredPosition = Vector2.zero;
+        crt.sizeDelta = new Vector2(0f, 400f);
+        sr.content = crt;
+
+        VerticalLayoutGroup cv = content.AddComponent<VerticalLayoutGroup>();
+        cv.padding = new RectOffset(24, 24, 12, 20);
+        cv.spacing = 6f;
+        cv.childAlignment = TextAnchor.UpperLeft;
+        cv.childControlWidth = true;
+        cv.childControlHeight = false;
+        cv.childForceExpandWidth = true;
+        cv.childForceExpandHeight = false;
+
+        ContentSizeFitter fitter = content.AddComponent<ContentSizeFitter>();
+        fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        GameObject textGo = new GameObject("PageText");
+        textGo.transform.SetParent(content.transform, false);
+        pageTmp = textGo.AddComponent<TextMeshProUGUI>();
+        if (TMP_Settings.defaultFontAsset != null)
+            pageTmp.font = TMP_Settings.defaultFontAsset;
+        pageTmp.fontSize = 16f;
+        pageTmp.alignment = TextAlignmentOptions.TopLeft;
+        pageTmp.textWrappingMode = TextWrappingModes.Normal;
+        // Tighter, more even line rhythm on parchment (avoids "floating" ragged look).
+        pageTmp.lineSpacing = 4f;
+        pageTmp.paragraphSpacing = 2f;
+        pageTmp.margin = new Vector4(0f, 0f, 0f, 0f);
+        pageTmp.color = new Color(0.20f, 0.14f, 0.10f, 1f);
+        pageTmp.text = "";
+        pageTmp.raycastTarget = false;
+        LayoutElement tle = textGo.AddComponent<LayoutElement>();
+        tle.flexibleWidth = 1f;
+        tle.minHeight = 32f;
+
+        return sr;
     }
 
     private void ShowCodexBookAtPage(int pageIndex)
     {
-        if (_codexModalRoot == null || _codexTitleText == null || _codexBodyText == null)
+        if (_codexModalRoot == null || _codexTitleText == null || _codexLeftPageText == null || _codexRightPageText == null)
             return;
 
         int max = Mathf.Max(1, LegalCodex.PageCount) - 1;
         _codexPageIndex = Mathf.Clamp(pageIndex, 0, max);
 
         _codexTitleText.text = LegalCodex.GetPageTitleEn(_codexPageIndex) +
-                               "  <size=80%><color=#B7B9C0>(" + (_codexPageIndex + 1) + "/" + (max + 1) + ")</color></size>";
-        _codexBodyText.text = LegalCodex.BuildCodexPageBodyEn(_codexPageIndex);
+                               "  <size=78%><color=#5C4A38>(" + (_codexPageIndex + 1) + "/" + (max + 1) + ")</color></size>";
+
+        LegalCodex.BuildCodexPageSpreadEn(_codexPageIndex, out string left, out string right);
+        _codexLeftPageText.text = left;
+        _codexRightPageText.text = right;
+
+        ScrollRect leftSr = _codexLeftPageText.GetComponentInParent<ScrollRect>();
+        ScrollRect rightSr = _codexRightPageText.GetComponentInParent<ScrollRect>();
+        if (leftSr != null)
+            leftSr.verticalNormalizedPosition = 1f;
+        if (rightSr != null)
+            rightSr.verticalNormalizedPosition = 1f;
 
         if (_codexTocRoot != null)
             _codexTocRoot.gameObject.SetActive(_codexPageIndex == 0);
 
-        if (_codexPrevButton != null)
-            _codexPrevButton.interactable = _codexPageIndex > 0;
-        if (_codexNextButton != null)
-            _codexNextButton.interactable = _codexPageIndex < max;
+        if (_codexPagePrevButton != null)
+            _codexPagePrevButton.interactable = _codexPageIndex > 0;
+        if (_codexPageNextButton != null)
+            _codexPageNextButton.interactable = _codexPageIndex < max;
 
+        ApplyCodexModalLeftSidebarInset();
         _codexModalRoot.SetActive(true);
         _codexModalRoot.transform.SetAsLastSibling();
         BringPlanningInteractiveChromeToFront();
@@ -4673,30 +5179,37 @@ public class PlanningShellController : MonoBehaviour
         {
             Transform onCanvas = canvasTf.Find(InstitutionDockName);
             if (onCanvas != null)
-                Destroy(onCanvas.gameObject);
+                DestroyObjectSafe(onCanvas.gameObject);
         }
 
         Transform legacyOnBar = bottomBar.Find(InstitutionDockName);
         if (legacyOnBar != null)
-            Destroy(legacyOnBar.gameObject);
+            DestroyObjectSafe(legacyOnBar.gameObject);
 
         // Left→right matches the planning dock reference: federal / civic / revenue / police / justice / health / corrections.
         (string title, string stem, string glyph, Color tint, string body)[] entries =
         {
             ("Federal Bureau", "institution_shin_bet", "F", new Color(0.25f, 0.32f, 0.48f, 1f),
-                "<b>Federal Bureau</b>\n\nPlaceholder — interstate enforcement, federal cases, wiretaps, and classified exposure."),
+                "<b>Federal Bureau</b>\n\nInterstate task forces, RICO-adjacent files, wire rooms, and sealed exhibits. " +
+                "Opens the federal overlay on warrants, informants, and anything that crosses state lines."),
             ("City Hall", "institution_city_hall", "M", new Color(0.38f, 0.48f, 0.52f, 1f),
-                "<b>City Hall</b>\n\nPlaceholder — permits, zoning favors, and elected pressure."),
+                "<b>City Hall</b>\n\nPermits, inspectors, zoning variances, and who gets the next ribbon-cutting. " +
+                "Use it to lean on departments or launder legitimacy through civic contracts."),
             ("Taxes", "institution_taxes", "T", new Color(0.35f, 0.48f, 0.38f, 1f),
-                "<b>Taxes</b>\n\nPlaceholder — audits, filings, and revenue service attention."),
+                "<b>Taxes</b>\n\nFilings, audits, liens, and revenue officers who remember every discrepancy. " +
+                "Where clean books meet uncomfortable questions about cash businesses."),
             ("Police", "institution_police", "P", new Color(0.32f, 0.42f, 0.58f, 1f),
-                "<b>Police</b>\n\nPlaceholder — heat, investigations, and precinct posture. Wire warrants, stakeouts, and bribes here."),
+                "<b>Police</b>\n\nPrecinct posture, investigations, warrants, and street heat. " +
+                "Wire taps, stakeouts, and the occasional envelope — all logged somewhere."),
             ("Court", "institution_court", "D", new Color(0.48f, 0.40f, 0.32f, 1f),
-                "<b>Court</b>\n\nPlaceholder — dockets, judges, motions, and trial calendars."),
+                "<b>Court</b>\n\nDockets, judges, motions, continuances, and sentencing ranges. " +
+                "The slow grind where your crew’s freedom gets a case number."),
             ("Hospital", "institution_hospital", "H", new Color(0.52f, 0.36f, 0.38f, 1f),
-                "<b>Hospital</b>\n\nPlaceholder — trauma networks, records, and quiet beds for wounded operators."),
+                "<b>Hospital</b>\n\nTrauma bays, discreet wards, and medical records that never ask enough questions. " +
+                "Beds for gunshot crews and leverage over anyone on a gurney."),
             ("Prison", "institution_prison", "L", new Color(0.28f, 0.28f, 0.32f, 1f),
-                "<b>Prison</b>\n\nPlaceholder — inmates, transfers, and yard politics affecting your crew."),
+                "<b>Prison</b>\n\nIntake, classification, yard politics, and transfer windows. " +
+                "Where family business meets barbed wire and rival blocks."),
         };
 
         // Stretch across BottomBar so the row can be centered horizontally and vertically in the strip.
@@ -6014,6 +6527,9 @@ public class PlanningShellController : MonoBehaviour
             bottomBar.SetAsLastSibling();
         if (_aowHudRoot != null)
             _aowHudRoot.transform.SetAsLastSibling();
+        // Full-screen codex must stay above bottom bar / AoW strip or Prev/Next and lower page hits are blocked.
+        if (_codexModalRoot != null && _codexModalRoot.activeSelf)
+            _codexModalRoot.transform.SetAsLastSibling();
     }
 
     private void HideInstitutionWindow()
@@ -6152,11 +6668,12 @@ public class PlanningShellController : MonoBehaviour
 
         (string label, PoliceModalTabId tab)[] modeEntries =
         {
-            ("Stations", PoliceModalTabId.Stations),
-            ("Personnel", PoliceModalTabId.PersonnelOrg),
-            ("Cases (TBD)", PoliceModalTabId.Cases),
-            ("Pressure / ops (TBD)", PoliceModalTabId.Actions),
-            ("Overview (TBD)", PoliceModalTabId.Overview)
+            ("Known Situation", PoliceModalTabId.KnownSituation),
+            ("People & Locations", PoliceModalTabId.KnownPeopleLocations),
+            ("Cases & Ops", PoliceModalTabId.KnownCasesOps),
+            ("Weaknesses", PoliceModalTabId.KnownWeaknessesOpportunities),
+            ("Actions", PoliceModalTabId.AvailableActions),
+            ("LOG", PoliceModalTabId.OutcomeLog)
         };
         for (int i = 0; i < modeEntries.Length; i++)
         {
@@ -6212,11 +6729,11 @@ public class PlanningShellController : MonoBehaviour
         BuildOneStubGovernmentShell(panel, "City Hall",
             new Color(0.10f, 0.14f, 0.16f, 0.99f),
             new Color(0.14f, 0.18f, 0.21f, 1f),
-            "Overview", "Departments (TBD)", "Leverage (TBD)");
+            "Overview", "Departments", "Leverage");
         BuildOneStubGovernmentShell(panel, "Taxes",
             new Color(0.09f, 0.14f, 0.11f, 0.99f),
             new Color(0.12f, 0.19f, 0.14f, 1f),
-            "Overview", "Filings (TBD)", "Audits (TBD)");
+            "Overview", "Filings", "Audits");
         BuildOneStubGovernmentShell(panel, "Court",
             new Color(0.14f, 0.11f, 0.09f, 0.99f),
             new Color(0.20f, 0.16f, 0.13f, 1f),
@@ -6224,7 +6741,7 @@ public class PlanningShellController : MonoBehaviour
         BuildOneStubGovernmentShell(panel, "Hospital",
             new Color(0.15f, 0.10f, 0.11f, 0.99f),
             new Color(0.20f, 0.13f, 0.14f, 1f),
-            "Overview", "Records (TBD)", "Capacity (TBD)");
+            "Overview", "Records", "Capacity");
         BuildOneStubGovernmentShell(panel, "Prison",
             new Color(0.26f, 0.1f, 0.09f, 0.99f),
             new Color(0.32f, 0.14f, 0.12f, 1f),
@@ -6343,12 +6860,30 @@ public class PlanningShellController : MonoBehaviour
             : "—";
 
         if (shell.LeftPanelTitle != null)
-            shell.LeftPanelTitle.text = "<b>Entries</b> <size=85%><i>(TBD)</i></size>";
+            shell.LeftPanelTitle.text = "<b>Register</b>";
 
-        shell.CenterBody.text =
-            "<b>" + title + "</b>\n<b>" + tabName + "</b>\n\n" +
-            "<i>Content coming soon.</i>\n\n" +
-            "<size=90%>Same tri-pane template as Police: left list, center detail, right actions, bottom mode bar. Replace this text when wiring real data.</size>";
+        string stubNarrative = title switch
+        {
+            "Federal Bureau" =>
+                "Federal desks track wire affidavits, interstate priors, and sealed inquiries. " +
+                "Use the register for targets; detail panes fill in when city data is available.",
+            "City Hall" =>
+                "Departments sit behind budget lines — permits, inspectors, franchises. " +
+                "Leverage is who owes a vote, who needs a variance, and who can stall a contract.",
+            "Taxes" =>
+                "Filings anchor audit timelines; liens and revenue notices follow real balances. " +
+                "Escalation paths run from desk review to field collections.",
+            "Court" =>
+                "Docket slices show arraignment vs. motion practice. " +
+                "Personnel covers clerks and prosecutors attached to your headlines.",
+            "Hospital" =>
+                "Records tie admissions to injury codes; capacity tracks beds and diversion risk. " +
+                "Quiet wings matter as much as surgical throughput.",
+            _ =>
+                "Institutional index: left list, center narrative, right actions —same shell as Police when data binds."
+        };
+
+        shell.CenterBody.text = "<b>" + title + "</b>\n<b>" + tabName + "</b>\n\n" + stubNarrative;
     }
 
     private void RefreshPrisonInstitutionShell(StubGovernmentInstitutionUi ui)
@@ -6599,12 +7134,39 @@ public class PlanningShellController : MonoBehaviour
         }
     }
 
-    private void AddPoliceShellAction(string label)
+    private enum PoliceIntelCertainty
+    {
+        Rumor = 0,
+        Estimated = 1,
+        Revealed = 2
+    }
+
+    private enum PoliceExternalActionOutcome
+    {
+        Success = 0,
+        PartialSuccess = 1,
+        SilentFailure = 2,
+        LoudFailure = 3
+    }
+
+    private sealed class PoliceExternalActionDefinition
+    {
+        public string actionId;
+        public string label;
+        public bool available;
+        public string unavailableReason;
+    }
+
+    private void AddPoliceShellAction(string label, bool available = true, string unavailableReason = "")
     {
         if (_policeShell == null || _policeShell.RightActionsRoot == null)
             return;
-        Button a = CreateGovernmentShellRowButton(_policeShell.RightActionsRoot, label);
+        string uiLabel = available || string.IsNullOrEmpty(unavailableReason)
+            ? label
+            : label + " — locked (" + unavailableReason + ")";
+        Button a = CreateGovernmentShellRowButton(_policeShell.RightActionsRoot, uiLabel);
         string cap = label;
+        a.interactable = available;
         a.onClick.AddListener(() => Debug.Log("[Police] Action (stub): " + cap));
         _policeShell.RightActionButtons.Add(a);
     }
@@ -6647,26 +7209,6 @@ public class PlanningShellController : MonoBehaviour
             img.color = active ? new Color(0.16f, 0.18f, 0.24f, 0.95f) : new Color(0.12f, 0.13f, 0.17f, 0.75f);
         }
 
-        if (GovernmentRuntimeCitySource.HasRenderableGovernmentData && _policeModalTab != PoliceModalTabId.Overview)
-        {
-            PoliceWindowMode cityMode = _policeModalTab switch
-            {
-                PoliceModalTabId.Stations => PoliceWindowMode.Deployment,
-                PoliceModalTabId.PersonnelOrg => PoliceWindowMode.Personnel,
-                PoliceModalTabId.Cases => PoliceWindowMode.Cases,
-                PoliceModalTabId.Actions => PoliceWindowMode.Pressure,
-                _ => PoliceWindowMode.Deployment
-            };
-            GovernmentWindowRuntimeBinder.ApplyPoliceShell(_policeShell, GovernmentRuntimeCitySource.ActiveCity,
-                cityMode, _policeCityGenStableSelection,
-                id =>
-                {
-                    _policeCityGenStableSelection = id;
-                    RefreshPoliceModalContent();
-                });
-            return;
-        }
-
         _policeShell.ClearLeftList();
         _policeShell.ClearRightActions();
 
@@ -6674,31 +7216,35 @@ public class PlanningShellController : MonoBehaviour
         {
             _policeShell.LeftPanelTitle.text = _policeModalTab switch
             {
-                PoliceModalTabId.Stations => "<b>Known stations</b>",
-                PoliceModalTabId.PersonnelOrg => "<b>Ranks / roles</b>",
-                PoliceModalTabId.Cases => "<b>Cases (TBD)</b>",
-                PoliceModalTabId.Actions => "<b>Ops (TBD)</b>",
-                PoliceModalTabId.Overview => "<b>Overview (TBD)</b>",
+                PoliceModalTabId.KnownSituation => "<b>Known situation</b>",
+                PoliceModalTabId.KnownPeopleLocations => "<b>Known people & locations</b>",
+                PoliceModalTabId.KnownCasesOps => "<b>Known cases & operations</b>",
+                PoliceModalTabId.KnownWeaknessesOpportunities => "<b>Weaknesses & opportunities</b>",
+                PoliceModalTabId.AvailableActions => "<b>Available actions</b>",
+                PoliceModalTabId.OutcomeLog => "<b>LOG / logistics view</b>",
                 _ => "<b>—</b>"
             };
         }
 
         switch (_policeModalTab)
         {
-            case PoliceModalTabId.Stations:
+            case PoliceModalTabId.KnownSituation:
+                PoliceShell_BuildOverviewMode();
+                break;
+            case PoliceModalTabId.KnownPeopleLocations:
                 PoliceShell_BuildStationsMode();
                 break;
-            case PoliceModalTabId.PersonnelOrg:
-                PoliceShell_BuildPersonnelOrgMode();
-                break;
-            case PoliceModalTabId.Cases:
+            case PoliceModalTabId.KnownCasesOps:
                 PoliceShell_BuildCasesMode();
                 break;
-            case PoliceModalTabId.Actions:
+            case PoliceModalTabId.KnownWeaknessesOpportunities:
                 PoliceShell_BuildActionsMode();
                 break;
+            case PoliceModalTabId.AvailableActions:
+                PoliceShell_BuildAvailableActionsMode();
+                break;
             default:
-                PoliceShell_BuildOverviewMode();
+                PoliceShell_BuildOutcomeLogMode();
                 break;
         }
     }
@@ -6736,13 +7282,14 @@ public class PlanningShellController : MonoBehaviour
             : GameSessionState.LastLocalPaperBlurb.Trim();
 
         _policeShell.CenterBody.text =
-            "<b>Police — overview</b>\n\n" +
+            "<b>Known situation</b>\n\n" +
             "• Pressure: <b>" + GameSessionState.FormatPolicePressureLabel() + "</b> (" + GameSessionState.PolicePressureDisplayValue() + "/100)\n" +
             "• Street posture: <b>" + GameSessionState.FormatStreetStopRiskLabel() + "</b> (" + GameSessionState.StreetStopRiskDisplayValue() + "/100)\n" +
             "• Intel: " + GameSessionState.GetAgencyIntelHint(GameSessionState.AgencyId.Police) + "\n" +
             "• Precincts discovered: " + discoveredPrecincts + "/" + totalPrecincts + "\n\n" +
             "<b>Local paper</b>\n" + paper + "\n\n" +
-            "<size=90%><i>FOG:</i> you only see what your organization has discovered. Discovery = knowledge of a station; Access = how freely you can approach people there.</size>";
+            "<size=90%><i>Certainty lanes:</i> Rumor / Estimated / Revealed. " +
+            "External window never shows internal police truth directly.</size>";
     }
 
     private void PoliceShell_ShowOverviewActions()
@@ -6823,12 +7370,13 @@ public class PlanningShellController : MonoBehaviour
 
         _policeShell.CenterBody.text =
             "<b>" + name + "</b>\n\n" +
-            "<b>Known intel</b> (FOG — only what your crew has learned)\n" +
+            "<b>Known people & locations</b>\n" +
             "• Commander: <i>" + (disc >= 2 ? "Not wired to data yet" : "Unknown") + "</i>\n" +
             "• Location: <i>" + (disc >= 1 ? "Not wired to data yet" : "Undisclosed") + "</i>\n" +
             "• Areas of responsibility: <i>" + (disc >= 3 ? "Not wired to data yet" : "Partially undisclosed") + "</i>\n" +
             "• Discovery (knowledge of station): " + disc + "/5\n" +
             "• Access (approach / infiltration): " + acc + "/5\n" +
+            "• Certainty: " + SafePoliceCertaintyLabel(ResolveFacilityCertainty(f)) + "\n" +
             (string.IsNullOrWhiteSpace(f.LastPublicMention)
                 ? ""
                 : "\n<b>Public mention</b>\n" + f.LastPublicMention.Trim() + "\n") +
@@ -6903,20 +7451,23 @@ public class PlanningShellController : MonoBehaviour
             ? "<i>No fresh police activity on your file.</i>"
             : GameSessionState.LastPoliceInvestigationUpdate.Trim();
         _policeShell.CenterBody.text =
-            "<b>Your file — blotter</b>\n\n" + blotter + "\n\n" +
-            "<size=90%><i>1920s rule:</i> no report -> no investigation; no witness/HUMINT -> no suspect linkage.</size>";
+            "<b>Known cases & operations</b>\n\n" +
+            "• Blotter: " + blotter + "\n" +
+            "• Certainty: " + SafePoliceCertaintyLabel(ResolveInvestigationCertainty()) + "\n\n" +
+            "<size=90%>Cases and evidence are unified in one lane. " +
+            "You only see what was discovered, leaked, or inferred.</size>";
         _policeShell.ClearRightActions();
-        AddPoliceShellAction("Counter-intel (stub)");
-        AddPoliceShellAction("Lawyer consult (stub)");
+        AddPoliceShellAction("Counter-intel");
+        AddPoliceShellAction("Lawyer consult");
     }
 
     private void PoliceShell_BuildActionsMode()
     {
-        Button b1 = CreateGovernmentShellRowButton(_policeShell.LeftContent, "Pressure & posture");
+        Button b1 = CreateGovernmentShellRowButton(_policeShell.LeftContent, "Weakness map");
         b1.onClick.AddListener(PoliceShell_ShowActionsPressurePanel);
         _policeShell.LeftListButtons.Add(b1);
 
-        Button b2 = CreateGovernmentShellRowButton(_policeShell.LeftContent, "Evidence & files");
+        Button b2 = CreateGovernmentShellRowButton(_policeShell.LeftContent, "Opportunity board");
         b2.onClick.AddListener(PoliceShell_ShowActionsEvidencePanel);
         _policeShell.LeftListButtons.Add(b2);
 
@@ -6926,23 +7477,175 @@ public class PlanningShellController : MonoBehaviour
     private void PoliceShell_ShowActionsPressurePanel()
     {
         _policeShell.CenterBody.text =
-            "<b>Strategic actions</b>\n\n" +
-            "Systemic moves against police attention: heat, case-building, and street posture.\n\n" +
-            "<i>Stub — wiring to simulation next.</i>";
+            "<b>Known weaknesses</b>\n\n" +
+            "• Station overload: " + (GameSessionState.PolicePressureDisplayValue() >= 55 ? "Estimated" : "Rumor") + "\n" +
+            "• Thin shifts: " + (GameSessionState.StreetStopRiskDisplayValue() >= 45 ? "Revealed" : "Estimated") + "\n" +
+            "• Internal coordination friction: Estimated\n" +
+            "• Vulnerable witnesses / chain points: Rumor\n\n" +
+            "<size=90%>Weakness lane is external knowledge only, not police internal certainty.</size>";
         _policeShell.ClearRightActions();
-        AddPoliceShellAction("Reduce heat (stub)");
-        AddPoliceShellAction("Plant false lead (stub)");
+        AddPoliceShellAction("Search bribable officer", HasDiscoveredPoliceOfficer(), "no identified officer");
+        AddPoliceShellAction("Probe weak station shift", HasDiscoveredPoliceFacility(), "no known station");
     }
 
     private void PoliceShell_ShowActionsEvidencePanel()
     {
         _policeShell.CenterBody.text =
-            "<b>Evidence lane</b>\n\n" +
-            "Tamper chain-of-custody, steal dockets, or burn a weak exhibit — only if your characters have access.\n\n" +
-            "<i>Stub.</i>";
+            "<b>Known opportunities</b>\n\n" +
+            "• Case file theft window: " + (CanRunDocumentTheft() ? "Estimated" : "Rumor") + "\n" +
+            "• Political pressure channel: Estimated\n" +
+            "• Patrol ambush exposure: " + (GameSessionState.StreetStopRiskDisplayValue() >= 50 ? "Revealed" : "Estimated") + "\n\n" +
+            "<size=90%>Every opportunity raises both potential gains and trace risk.</size>";
         _policeShell.ClearRightActions();
-        AddPoliceShellAction("Steal document (stub)");
-        AddPoliceShellAction("Taint exhibit (stub)");
+        AddPoliceShellAction("Steal document", CanRunDocumentTheft(), "insufficient intel or crew");
+        AddPoliceShellAction("Plant disinformation", CanRunDisinformationAction(), "intel network too weak");
+    }
+
+    private void PoliceShell_BuildAvailableActionsMode()
+    {
+        _policeShell.CenterBody.text =
+            "<b>Available actions</b>\n\n" +
+            "Actions unlock only when opening conditions are met.\n\n" +
+            BuildPoliceActionAvailabilityBoard();
+        _policeShell.ClearRightActions();
+        var defs = BuildPoliceExternalActionDefinitions();
+        for (int i = 0; i < defs.Count; i++)
+            AddPoliceShellAction(defs[i].label, defs[i].available, defs[i].unavailableReason);
+    }
+
+    private void PoliceShell_BuildOutcomeLogMode()
+    {
+        int inTransit = 0;
+        int delayed = 0;
+        int incidents = PoliceWorldState.LogIncidents != null ? PoliceWorldState.LogIncidents.Count : 0;
+        if (PoliceWorldState.LogShipments != null)
+        {
+            for (int i = 0; i < PoliceWorldState.LogShipments.Count; i++)
+            {
+                var s = PoliceWorldState.LogShipments[i];
+                if (s == null) continue;
+                if (s.status == LogisticsShipmentStatus.InTransit) inTransit++;
+                if (s.status == LogisticsShipmentStatus.Delayed) delayed++;
+            }
+        }
+        PoliceIntelCertainty certainty = ResolveInvestigationCertainty();
+        _policeShell.CenterBody.text =
+            "<b>LOG (Logistics)</b>\n\n" +
+            "• Active shipments: " + inTransit + "\n" +
+            "• Delayed shipments: " + delayed + "\n" +
+            "• Logistics incidents: " + incidents + "\n\n" +
+            "• Last police update: " +
+            (string.IsNullOrWhiteSpace(GameSessionState.LastPoliceInvestigationUpdate)
+                ? "No confirmed outcome yet."
+                : GameSessionState.LastPoliceInvestigationUpdate.Trim()) + "\n" +
+            "• Certainty: " + SafePoliceCertaintyLabel(certainty) + "\n\n" +
+            "<b>Outcome classes</b>\n" +
+            "• Success\n" +
+            "• PartialSuccess\n" +
+            "• SilentFailure\n" +
+            "• LoudFailure\n\n" +
+            "<size=90%>LOG is logistics, not records journal. REC will hold history/audit trails.</size>";
+        _policeShell.ClearRightActions();
+        AddPoliceShellAction("Review delayed shipment");
+    }
+
+    private List<PoliceExternalActionDefinition> BuildPoliceExternalActionDefinitions()
+    {
+        bool hasStation = HasDiscoveredPoliceFacility();
+        bool hasOfficer = HasDiscoveredPoliceOfficer();
+        bool hasCrew = PersonnelRegistry.Members != null && PersonnelRegistry.Members.Count > 0;
+        bool hasBudget = GameSessionState.CrewCash >= 100;
+        bool hasIntel = GameSessionState.PlayerIntelNetworkRating >= 15;
+        return new List<PoliceExternalActionDefinition>
+        {
+            new PoliceExternalActionDefinition { actionId = "BribeOfficer", label = "BribeOfficer", available = hasOfficer && hasBudget && hasCrew, unavailableReason = "needs identified officer + budget + crew" },
+            new PoliceExternalActionDefinition { actionId = "BlackmailOfficer", label = "BlackmailOfficer", available = hasOfficer && hasIntel, unavailableReason = "needs identified officer + pressure intel" },
+            new PoliceExternalActionDefinition { actionId = "RecruitPoliceSource", label = "RecruitPoliceSource", available = hasOfficer && hasCrew, unavailableReason = "needs identified officer + free handler" },
+            new PoliceExternalActionDefinition { actionId = "StealCaseFile", label = "StealCaseFile", available = CanRunDocumentTheft(), unavailableReason = "needs station access + field crew" },
+            new PoliceExternalActionDefinition { actionId = "DisruptInvestigation", label = "DisruptInvestigation", available = hasStation && hasCrew, unavailableReason = "needs known target operation" },
+            new PoliceExternalActionDefinition { actionId = "RemoveEvidence", label = "RemoveEvidence", available = hasStation && hasIntel, unavailableReason = "needs evidence lane intel" },
+            new PoliceExternalActionDefinition { actionId = "ThreatenWitness", label = "ThreatenWitness", available = hasIntel && hasCrew, unavailableReason = "needs witness intelligence" },
+            new PoliceExternalActionDefinition { actionId = "TrackOfficer", label = "TrackOfficer", available = hasOfficer && hasCrew, unavailableReason = "needs identified officer + tails team" },
+            new PoliceExternalActionDefinition { actionId = "AttackPatrol", label = "AttackPatrol", available = hasStation && hasCrew, unavailableReason = "needs known patrol route" },
+            new PoliceExternalActionDefinition { actionId = "SpreadDisinformation", label = "SpreadDisinformation", available = CanRunDisinformationAction(), unavailableReason = "intel network too weak" },
+            new PoliceExternalActionDefinition { actionId = "UsePoliticalConnection", label = "UsePoliticalConnection", available = hasBudget, unavailableReason = "needs political budget" }
+        };
+    }
+
+    private string BuildPoliceActionAvailabilityBoard()
+    {
+        var defs = BuildPoliceExternalActionDefinitions();
+        int available = 0;
+        for (int i = 0; i < defs.Count; i++)
+        {
+            if (defs[i].available)
+                available++;
+        }
+        int blocked = defs.Count - available;
+        return
+            "• Available now: " + available + "\n" +
+            "• Locked: " + blocked + "\n" +
+            "• KnowledgeGain / ExposureRisk / SuspicionGain apply to each action\n" +
+            "• External data never bypasses discovery rules";
+    }
+
+    private bool HasDiscoveredPoliceFacility()
+    {
+        for (int i = 0; i < GameSessionState.PoliceFacilities.Count; i++)
+        {
+            var f = GameSessionState.PoliceFacilities[i];
+            if (f != null && f.DiscoveryLevel > 0)
+                return true;
+        }
+        return false;
+    }
+
+    private bool HasDiscoveredPoliceOfficer()
+    {
+        for (int i = 0; i < GameSessionState.PoliceFacilities.Count; i++)
+        {
+            var f = GameSessionState.PoliceFacilities[i];
+            if (f != null && f.DiscoveryLevel >= 2)
+                return true;
+        }
+        return false;
+    }
+
+    private bool CanRunDocumentTheft()
+    {
+        return HasDiscoveredPoliceFacility()
+               && PersonnelRegistry.Members != null
+               && PersonnelRegistry.Members.Count >= 2
+               && GameSessionState.PlayerIntelNetworkRating >= 10;
+    }
+
+    private bool CanRunDisinformationAction()
+    {
+        return GameSessionState.PlayerIntelNetworkRating >= 25 && GameSessionState.CrewCash >= 50;
+    }
+
+    private PoliceIntelCertainty ResolveFacilityCertainty(GameSessionState.PoliceFacilityRecord f)
+    {
+        if (f == null) return PoliceIntelCertainty.Rumor;
+        if (f.DiscoveryLevel >= 3) return PoliceIntelCertainty.Revealed;
+        if (f.DiscoveryLevel >= 1) return PoliceIntelCertainty.Estimated;
+        return PoliceIntelCertainty.Rumor;
+    }
+
+    private PoliceIntelCertainty ResolveInvestigationCertainty()
+    {
+        if (!string.IsNullOrWhiteSpace(GameSessionState.LastPoliceInvestigationUpdate))
+            return PoliceIntelCertainty.Revealed;
+        if (GameSessionState.PlayerIntelNetworkRating >= 25)
+            return PoliceIntelCertainty.Estimated;
+        return PoliceIntelCertainty.Rumor;
+    }
+
+    private string SafePoliceCertaintyLabel(PoliceIntelCertainty c)
+    {
+        if (c == PoliceIntelCertainty.Rumor) return "Rumor";
+        if (c == PoliceIntelCertainty.Estimated) return "Estimated";
+        return "Revealed";
     }
 
     private static int CountIncarceratedCrewMembers()
@@ -7217,41 +7920,9 @@ public class PlanningShellController : MonoBehaviour
             case PlanningTabId.Overview:
                 _titleText.text = "Overview — your empire";
                 _contextText.text = "Campaign day " + GameSessionState.CurrentDay + "\n" + GameCalendarSystem.FormatPlanningHudLine(GameSessionState.CurrentDay);
-                string bossName = PlayerRunState.Character?.DisplayName ?? "Boss";
-                _leftText.text = "<b>Boss</b>\n• " + bossName + "\n\n<b>Crew</b>\n• $" + GameSessionState.CrewCash + " on hand\n• " + PersonnelRegistry.Members.Count + " members";
-                _centerText.text =
-                    "<b>Welcome to the planning phase.</b>\n\n" +
-                    "Use the tabs above to manage news, intel, personnel, operations, and more.\n\n" +
-                    "• <b>News</b> — city narrative, headlines, press pressure\n" +
-                    "• <b>Ops</b> — queue missions, then End Turn to execute";
-                int imprisonedCount = CountIncarceratedCrewMembers();
-                if (imprisonedCount > 0)
-                {
-                    _centerText.text += "\n\n<b>Prison alert:</b> " + imprisonedCount +
-                        " crew member" + (imprisonedCount == 1 ? "" : "s") +
-                        " in custody or sentenced. Check the Prison panel.";
-                }
-                if (GameSessionState.UnderworldWarDeclaredOnPlayerFamily)
-                {
-                    _centerText.text +=
-                        "\n\n<b>Open war:</b> rival crime families have declared war on your organization.";
-                }
-                string detained = string.IsNullOrEmpty(GameSessionState.InitialDetainedCharacterName)
-                    ? "None"
-                    : GameSessionState.InitialDetainedCharacterName;
-                _rightText.text =
-                    "<b>Quick status</b>\n" +
-                    "• Cash: $" + GameSessionState.CrewCash + "\n" +
-                    "• Campaign day: " + GameSessionState.CurrentDay + "\n" +
-                    "• Police pressure: " + GameSessionState.FormatPolicePressureLabel() + " (" + GameSessionState.PolicePressureDisplayValue() + "/100)\n" +
-                    "• Street stop risk: <b>" + GameSessionState.FormatStreetStopRiskLabel() + "</b> (" + GameSessionState.StreetStopRiskDisplayValue() + "/100)\n" +
-                    "• Detained: " + detained +
-                    (GameSessionState.BossIsPoliceInformant
-                        ? "\n• <color=#E8C96A>Boss: Police informant</color>"
-                        : "") +
-                    (GameSessionState.BossSnitchKnownToRivalGangs
-                        ? "\n• <color=#FF6B5C>Boss: Snitch</color>"
-                        : "");
+                _leftText.text = BuildOverviewLeftPanel();
+                _centerText.text = BuildOverviewCenterPanel();
+                _rightText.text = BuildOverviewRightPanel();
                 break;
 
             case PlanningTabId.News:
@@ -7308,11 +7979,10 @@ public class PlanningShellController : MonoBehaviour
 
             case PlanningTabId.Intelligence:
                 _titleText.text = "Intelligence — wires & rumors";
-                _contextText.text = "SIGINT · HUMINT · street chatter · rival movements";
-                _leftText.text = "<b>Feeds</b>\n• District nets\n• Police band\n• Docks";
-                _centerText.text =
-                    "<i>Placeholder:</i> intel queue, confidence scores, and time-to-expire.";
-                _rightText.text = "<b>Alerts</b>\n• New leads: 0\n• Burn risk: Low";
+                _contextText.text = BuildIntelContextLine();
+                _leftText.text = BuildIntelLeftPanel();
+                _centerText.text = BuildIntelCenterPanel();
+                _rightText.text = BuildIntelRightPanel();
                 break;
 
             case PlanningTabId.Personnel:
@@ -7359,30 +8029,58 @@ public class PlanningShellController : MonoBehaviour
                 break;
 
             case PlanningTabId.Diplomacy:
+            {
+                string warRisk = GameSessionState.UnderworldWarDeclaredOnPlayerFamily
+                    ? "<color=#FF8A7A>High — open war</color>"
+                    : "Low";
                 _titleText.text = "Diplomacy — factions & deals";
                 _contextText.text = "Treaties · tribute · truces · back channels";
                 _leftText.text = "<b>Factions</b>\n• City hall\n• Unions\n• Rivals";
-                _centerText.text = "<i>Placeholder:</i> relationship matrix and pending offers.";
-                _rightText.text = "<b>Standing</b>\n• Deals open: 0\n• War risk: TBD";
+                _centerText.text =
+                    "<b>Relationship board</b>\n\n" +
+                    "Rows are factions; columns track <b>standing</b>, <b>tribute due</b>, and <b>pending offers</b> " +
+                    "(protection, territory swaps, hit stand-downs). Back-channel slots unlock with intel.\n\n" +
+                    "<size=92%>Green is workable; red means shots are already flying — check Ops for reprisals.</size>";
+                _rightText.text =
+                    "<b>Standing</b>\n" +
+                    "• Active deals: 0\n" +
+                    "• War risk: " + warRisk + "\n" +
+                    "• Street heat: " + GameSessionState.FormatStreetStopRiskLabel();
                 break;
+            }
 
             case PlanningTabId.Business:
                 _titleText.text = "Business — fronts & off-books";
                 _contextText.text = "Legit fronts · gray revenue · exposure and audits";
                 _leftText.text = "<b>Legal</b>\n• Restaurants\n• Garages\n\n<b>Off-books</b>\n• Street tax\n• Gaming";
                 _centerText.text =
-                    "<i>Placeholder:</i> combine legit P&L with underground lines and heat.";
+                    "<b>P&L overlay</b>\n\n" +
+                    "Legit storefronts carry payroll, suppliers, and licenses; off-books lines show street pulls, gaming, " +
+                    "and protection skim. <b>Exposure</b> rises when auditors cross paths with crews carrying cash.\n\n" +
+                    "<size=92%>Tie clean revenue to laundering windows; spike audit risk pulls tax eyes.</size>";
                 _rightText.text =
-                    "<b>Snapshot</b>\n• Legit income: TBD\n• Audit heat: Low\n• Police interest: " + GameSessionState.FormatPolicePressureLabel() +
-                    "\n• Street stop risk: " + GameSessionState.FormatStreetStopRiskLabel();
+                    "<b>Snapshot</b>\n" +
+                    "• Legit weekly (fronts): — assign in Ops\n" +
+                    "• Audit pressure: Low\n" +
+                    "• Police interest: " + GameSessionState.FormatPolicePressureLabel() + "\n" +
+                    "• Street stop risk: " + GameSessionState.FormatStreetStopRiskLabel() + "\n" +
+                    "• Dirty float: " + GameSessionState.FormatBlackCashDisplay();
                 break;
 
             case PlanningTabId.Logistics:
                 _titleText.text = "Logistics — routes & stash";
                 _contextText.text = "Warehousing · transport · supply for crews and fronts";
                 _leftText.text = "<b>Nodes</b>\n• Garages\n• Warehouses\n• Drops";
-                _centerText.text = "<i>Placeholder:</i> capacity, routes, and interdiction risk.";
-                _rightText.text = "<b>Throughput</b>\n• Weekly: TBD\n• Seizure risk: Low";
+                _centerText.text =
+                    "<b>Supply graph</b>\n\n" +
+                    "Nodes hold <b>capacity</b> (cold storage, vehicles, cash rooms). Edges are routes with travel time, " +
+                    "tolls, and <b>interdiction</b> odds from police activity and rival hijacks.\n\n" +
+                    "<size=92%>Queue convoys from Ops; empty legs burn money and attention.</size>";
+                _rightText.text =
+                    "<b>Throughput</b>\n" +
+                    "• Weekly manifest: — (queue Ops runs)\n" +
+                    "• Seizure risk: Low\n" +
+                    "• Police interest: " + GameSessionState.FormatPolicePressureLabel();
                 break;
 
             case PlanningTabId.Legal:
@@ -7403,8 +8101,17 @@ public class PlanningShellController : MonoBehaviour
                 _titleText.text = "Finance — books & laundry";
                 _contextText.text = "Cash · laundering · investments · debt service";
                 _leftText.text = "<b>Ledgers</b>\n• Operating\n• Laundry\n• War chest";
-                _centerText.text = "<i>Placeholder:</i> balances, flows, and monthly burn.";
-                _rightText.text = "<b>Totals</b>\n• Liquid: TBD\n• Runway: TBD";
+                _centerText.text =
+                    "<b>Treasury</b>\n\n" +
+                    "Operating covers payroll and street pulls; laundry tracks wash cycles and fee drag; war chest holds " +
+                    "long-term binds and debt service. Monthly <b>burn</b> stacks payroll, interest, and protection costs.\n\n" +
+                    "<size=92%>Clean accounts live here; dirty cash stays in metrics until washed.</size>";
+                _rightText.text =
+                    "<b>Balances</b>\n" +
+                    "• Accounts (clean): " + GameSessionState.FormatCrewCashDisplay() + "\n" +
+                    "• Cash in hand (dirty): " + GameSessionState.FormatBlackCashDisplay() + "\n" +
+                    "• Runway: — (set payroll & debt in ledgers)\n" +
+                    "• Audit exposure: Low";
                 break;
 
             default:
@@ -7418,7 +8125,6 @@ public class PlanningShellController : MonoBehaviour
 
         if (tab != PlanningTabId.Legal)
         {
-            _legalCodexOpen = false;
             if (_legalCodexToggleButton != null)
                 _legalCodexToggleButton.gameObject.SetActive(false);
             if (_legalLeftTopSpacer != null)
@@ -7521,6 +8227,280 @@ public class PlanningShellController : MonoBehaviour
         }
 
         RebuildMissionQueueOrderStrip();
+    }
+
+    private string BuildOverviewLeftPanel()
+    {
+        string bossName = PlayerRunState.Character?.DisplayName ?? "Boss";
+        int crewCount = PersonnelRegistry.Members != null ? PersonnelRegistry.Members.Count : 0;
+        return "<b>Boss</b>\n• " + bossName +
+            "\n\n<b>Crew</b>\n• $" + GameSessionState.CrewCash + " on hand\n• " + crewCount + " members";
+    }
+
+    private string BuildOverviewCenterPanel()
+    {
+        var rep = GetLatestFederalDailyReport();
+        var intelEntries = GetPlayerVisibleIntelEntries();
+        string text = "<b>Last day summary</b>\n\n";
+        if (rep == null)
+        {
+            text += "No federal daily report yet.\nAdvance one day to generate operational summary.";
+        }
+        else
+        {
+            text += "• Bureau strategy: " + SafeDailyStrategyLabel(rep.selectedStrategyInt) + "\n";
+            text += "• Federal interest: " + rep.federalInterestScore + "/100\n";
+            text += "• Requests generated: " + (rep.generatedRequestIds != null ? rep.generatedRequestIds.Count : 0) + "\n";
+            text += "• Operations completed: " + (rep.completedOperationIds != null ? rep.completedOperationIds.Count : 0) + "\n";
+            text += "• New federal cases: " + (rep.newFederalCaseIds != null ? rep.newFederalCaseIds.Count : 0) + "\n";
+            text += "• Updated federal cases: " + (rep.updatedFederalCaseIds != null ? rep.updatedFederalCaseIds.Count : 0) + "\n";
+            if (!string.IsNullOrEmpty(rep.notes))
+                text += "\n<b>Field notes:</b>\n" + rep.notes.Trim();
+        }
+
+        int imprisonedCount = CountIncarceratedCrewMembers();
+        if (imprisonedCount > 0)
+        {
+            text += "\n\n<b>Prison alert:</b> " + imprisonedCount +
+                " crew member" + (imprisonedCount == 1 ? "" : "s") +
+                " in custody or sentenced.";
+        }
+        if (GameSessionState.UnderworldWarDeclaredOnPlayerFamily)
+        {
+            text += "\n\n<b>Open war:</b> rival crime families declared war on your organization.";
+        }
+        int shared = 0;
+        int compartment = 0;
+        for (int i = 0; i < intelEntries.Count; i++)
+        {
+            if (intelEntries[i].scope == IntelKnowledgeScope.Shared) shared++;
+            else compartment++;
+        }
+        text += "\n\n<b>Intel dissemination</b>\n" +
+            "• Shared: " + shared + "\n" +
+            "• Compartment: " + compartment;
+        return text;
+    }
+
+    private string BuildOverviewRightPanel()
+    {
+        string detained = string.IsNullOrEmpty(GameSessionState.InitialDetainedCharacterName)
+            ? "None"
+            : GameSessionState.InitialDetainedCharacterName;
+        var rep = GetLatestFederalDailyReport();
+        string exposure = rep == null ? "—" : (rep.exposureChange >= 0 ? "+" + rep.exposureChange : rep.exposureChange.ToString());
+        string pressure = rep == null ? "—" : (rep.politicalPressureChange >= 0 ? "+" + rep.politicalPressureChange : rep.politicalPressureChange.ToString());
+        return
+            "<b>Quick status</b>\n" +
+            "• Cash: $" + GameSessionState.CrewCash + "\n" +
+            "• Campaign day: " + GameSessionState.CurrentDay + "\n" +
+            "• Police pressure: " + GameSessionState.FormatPolicePressureLabel() + " (" + GameSessionState.PolicePressureDisplayValue() + "/100)\n" +
+            "• Street stop risk: <b>" + GameSessionState.FormatStreetStopRiskLabel() + "</b> (" + GameSessionState.StreetStopRiskDisplayValue() + "/100)\n" +
+            "• Federal exposure delta: " + exposure + "\n" +
+            "• Political pressure delta: " + pressure + "\n" +
+            "• Detained: " + detained +
+            (GameSessionState.BossIsPoliceInformant ? "\n• <color=#E8C96A>Boss: Police informant</color>" : "") +
+            (GameSessionState.BossSnitchKnownToRivalGangs ? "\n• <color=#FF6B5C>Boss: Snitch</color>" : "");
+    }
+
+    private string BuildIntelContextLine()
+    {
+        int known = GetPlayerVisibleIntelEntries().Count;
+        return "Field intel known to your people: " + known + " item" + (known == 1 ? "" : "s");
+    }
+
+    private string BuildIntelLeftPanel()
+    {
+        var entries = GetPlayerVisibleIntelEntries();
+        int visible = entries.Count;
+        int verified = 0;
+        int urgent = 0;
+        int shared = 0;
+        int compartment = 0;
+        for (int i = 0; i < entries.Count; i++)
+        {
+            var item = entries[i].item;
+            if (item.verificationStatusInt >= (int)FederalIntelVerificationStatus.Corroborated) verified++;
+            if (item.actionabilityInt >= (int)FederalIntelActionability.PrepareOperation) urgent++;
+            if (entries[i].scope == IntelKnowledgeScope.Shared) shared++;
+            else compartment++;
+        }
+        return "<b>Intel feeds (known)</b>\n" +
+            "• Visible items: " + visible + "\n" +
+            "• Corroborated+: " + verified + "\n" +
+            "• Urgent leads: " + urgent + "\n" +
+            "• Shared: " + shared + "\n" +
+            "• Compartment: " + compartment + "\n\n" +
+            "<size=92%>Player sees only what own network knows.</size>";
+    }
+
+    private string BuildIntelCenterPanel()
+    {
+        var entries = GetPlayerVisibleIntelEntries();
+        if (entries.Count == 0)
+            return "<b>Intel desk</b>\n\nNo known actionable intel right now.\nBuild network, pay sources, and validate rumors.";
+
+        string s = "<b>Intel desk (known items)</b>\n\n";
+        int take = Mathf.Min(8, entries.Count);
+        for (int i = 0; i < take; i++)
+        {
+            var x = entries[i].item;
+            s += "• [" + SafeVerificationLabel(x.verificationStatusInt) + "] " +
+                SafeActionabilityLabel(x.actionabilityInt) + " · " +
+                SafeTargetLabel(x.targetId) + " · " +
+                SafeKnowledgeScopeLabel(entries[i].scope) + " (" + entries[i].holderCount + ")\n";
+            if (!string.IsNullOrEmpty(x.contentSummary))
+                s += "  " + x.contentSummary + "\n";
+        }
+        if (entries.Count > take)
+            s += "\n<size=90%>+" + (entries.Count - take) + " more known items.</size>";
+        return s;
+    }
+
+    private string BuildIntelRightPanel()
+    {
+        int burn = 0;
+        int disinfo = 0;
+        for (int i = 0; i < BureauWorldState.federalSourceProfiles.Count; i++)
+        {
+            var src = BureauWorldState.federalSourceProfiles[i];
+            if (src == null) continue;
+            if (src.currentStatusInt == (int)FederalSourceStatus.Compromised
+                || src.currentStatusInt == (int)FederalSourceStatus.Burned)
+                burn++;
+        }
+        var visible = GetPlayerVisibleIntelEntries();
+        for (int i = 0; i < visible.Count; i++)
+        {
+            if (visible[i].item != null && visible[i].item.truthStateInt == (int)FederalIntelTruthState.Disinformation)
+                disinfo++;
+        }
+        return "<b>Intel alerts</b>\n" +
+            "• Source burn risk: " + (burn > 0 ? "Rising" : "Low") + "\n" +
+            "• Known disinfo flags: " + disinfo + "\n" +
+            "• Police ears: " + GameSessionState.FormatPolicePressureLabel();
+    }
+
+    private enum IntelKnowledgeScope
+    {
+        Shared = 0,
+        Compartment = 1
+    }
+
+    private sealed class PlayerIntelVisibleEntry
+    {
+        public FederalIntelItem item;
+        public IntelKnowledgeScope scope;
+        public int holderCount;
+    }
+
+    private List<PlayerIntelVisibleEntry> GetPlayerVisibleIntelEntries()
+    {
+        var outList = new List<PlayerIntelVisibleEntry>();
+        var items = GetPlayerVisibleIntelItems();
+        int crewCount = Mathf.Max(1, PersonnelRegistry.Members != null ? PersonnelRegistry.Members.Count : 1);
+        for (int i = 0; i < items.Count; i++)
+        {
+            var x = items[i];
+            var scope = ResolveKnowledgeScope(x);
+            int holders = scope == IntelKnowledgeScope.Shared
+                ? crewCount
+                : Mathf.Clamp(1 + Mathf.RoundToInt(crewCount * 0.3f), 1, Mathf.Max(1, crewCount - 1));
+            outList.Add(new PlayerIntelVisibleEntry
+            {
+                item = x,
+                scope = scope,
+                holderCount = holders
+            });
+        }
+        return outList;
+    }
+
+    private List<FederalIntelItem> GetPlayerVisibleIntelItems()
+    {
+        var outList = new List<FederalIntelItem>();
+        int network = Mathf.Clamp(GameSessionState.PlayerIntelNetworkRating, 0, 100);
+        int maxItems = Mathf.Clamp(2 + network / 15, 2, 20);
+        for (int i = BureauWorldState.federalIntelItems.Count - 1; i >= 0 && outList.Count < maxItems; i--)
+        {
+            var x = BureauWorldState.federalIntelItems[i];
+            if (x == null) continue;
+            bool publicLeak = x.pressRisk >= 40 || x.exposureRisk >= 55;
+            bool networkCanSee = x.reliability >= Mathf.Max(10, 70 - network) || x.actionabilityInt >= (int)FederalIntelActionability.StartSurveillance;
+            if (publicLeak || networkCanSee)
+                outList.Add(x);
+        }
+        return outList;
+    }
+
+    private IntelKnowledgeScope ResolveKnowledgeScope(FederalIntelItem item)
+    {
+        if (item == null)
+            return IntelKnowledgeScope.Compartment;
+        if (item.actionabilityInt >= (int)FederalIntelActionability.PrepareOperation)
+            return IntelKnowledgeScope.Shared;
+        if (item.verificationStatusInt >= (int)FederalIntelVerificationStatus.Corroborated && item.exposureRisk < 65)
+            return IntelKnowledgeScope.Shared;
+        return IntelKnowledgeScope.Compartment;
+    }
+
+    private string SafeKnowledgeScopeLabel(IntelKnowledgeScope scope)
+    {
+        if (scope == IntelKnowledgeScope.Shared) return "Shared";
+        return "Compartment";
+    }
+
+    private FederalDailyReport GetLatestFederalDailyReport()
+    {
+        if (BureauWorldState.dailyReports == null || BureauWorldState.dailyReports.Count == 0)
+            return null;
+        return BureauWorldState.dailyReports[BureauWorldState.dailyReports.Count - 1];
+    }
+
+    private string SafeVerificationLabel(int statusInt)
+    {
+        if (statusInt == (int)FederalIntelVerificationStatus.Unverified) return "Unverified";
+        if (statusInt == (int)FederalIntelVerificationStatus.PartiallyVerified) return "PartiallyVerified";
+        if (statusInt == (int)FederalIntelVerificationStatus.Corroborated) return "Corroborated";
+        if (statusInt == (int)FederalIntelVerificationStatus.Contradicted) return "Contradicted";
+        if (statusInt == (int)FederalIntelVerificationStatus.ProvenFalse) return "ProvenFalse";
+        if (statusInt == (int)FederalIntelVerificationStatus.OperationallyConfirmed) return "OperationallyConfirmed";
+        return "Unknown";
+    }
+
+    private string SafeActionabilityLabel(int a)
+    {
+        if (a == (int)FederalIntelActionability.ArchiveOnly) return "Archive";
+        if (a == (int)FederalIntelActionability.WatchTarget) return "Watch";
+        if (a == (int)FederalIntelActionability.OpenActiveCase) return "OpenCase";
+        if (a == (int)FederalIntelActionability.RecruitSource) return "RecruitSource";
+        if (a == (int)FederalIntelActionability.StartSurveillance) return "Surveillance";
+        if (a == (int)FederalIntelActionability.PrepareOperation) return "PrepareOperation";
+        if (a == (int)FederalIntelActionability.ImmediateAction) return "ImmediateAction";
+        if (a == (int)FederalIntelActionability.SecurityThreat) return "SecurityThreat";
+        return "None";
+    }
+
+    private string SafeDailyStrategyLabel(int s)
+    {
+        if (s == (int)FederalDailyStrategy.Observe) return "Observe";
+        if (s == (int)FederalDailyStrategy.Infiltrate) return "Infiltrate";
+        if (s == (int)FederalDailyStrategy.Pressure) return "Pressure";
+        if (s == (int)FederalDailyStrategy.BuildCase) return "BuildCase";
+        if (s == (int)FederalDailyStrategy.TakeOverPoliceCase) return "TakeOverPoliceCase";
+        if (s == (int)FederalDailyStrategy.Strike) return "Strike";
+        if (s == (int)FederalDailyStrategy.LayLow) return "LayLow";
+        if (s == (int)FederalDailyStrategy.CoverUp) return "CoverUp";
+        return "Unknown";
+    }
+
+    private string SafeTargetLabel(string targetId)
+    {
+        if (string.IsNullOrEmpty(targetId)) return "UnknownTarget";
+        if (targetId.StartsWith("corrupt:")) return "CorruptionTarget";
+        if (targetId.StartsWith("police:")) return "PoliceCaseTarget";
+        if (targetId.StartsWith("federal:")) return "FederalCaseTarget";
+        return targetId;
     }
 
     public PlanningTabId CurrentTab => _current;

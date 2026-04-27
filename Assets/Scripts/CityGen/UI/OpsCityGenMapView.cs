@@ -10,7 +10,7 @@ using UnityEngine.UI;
 public static class OpsCityGenMapView
 {
     /// <summary>
-    /// Plan-cell units per layout pixel before viewport <b>contain</b> is baked into <see cref="RectTransform.sizeDelta"/>
+    /// Plan-cell units per layout pixel before viewport fit (<see cref="ScaleLayoutSizeToViewport"/>) is baked into <see cref="RectTransform.sizeDelta"/>
     /// and lot geometry (see <see cref="Rebuild"/>). Avoid relying on <c>localScale</c> for fit — it blurs uGUI.
     /// Strokes were tuned around legacy 1.35 plan-units/px; see <see cref="StrokeScale"/>.
     /// </summary>
@@ -20,6 +20,22 @@ public static class OpsCityGenMapView
 
     /// <summary>Road/outline distances in layout space scale so on-screen weight stays similar when layout resolution changes.</summary>
     static float StrokeScale => ReferencePlanUnitsPerUiPixel / PlanUnitsPerUiPixel;
+
+    /// <summary>
+    /// <para><b>Cover</b> (<paramref name="cover"/> true): <see cref="Mathf.Max"/> — fills the viewport; may crop (fewer visible macro tiles on wide screens).</para>
+    /// <para><b>Contain</b> (<paramref name="cover"/> false): <see cref="Mathf.Min"/> — entire map fits; may letterbox (sandbox macro 3×4 shows all 12 blocks).</para>
+    /// </summary>
+    static void ScaleLayoutSizeToViewport(ref float pxW, ref float pxH, Vector2 viewportLocalSize, bool cover)
+    {
+        if (viewportLocalSize.x <= 16f || viewportLocalSize.y <= 16f)
+            return;
+        float sFit = cover
+            ? Mathf.Max(viewportLocalSize.x / pxW, viewportLocalSize.y / pxH)
+            : Mathf.Min(viewportLocalSize.x / pxW, viewportLocalSize.y / pxH);
+        sFit = Mathf.Clamp(sFit, 0.02f, 200f);
+        pxW *= sFit;
+        pxH *= sFit;
+    }
 
     public sealed class BuildResult
     {
@@ -31,8 +47,7 @@ public static class OpsCityGenMapView
     /// <summary>Clears <paramref name="mapContentRoot"/> and draws lots; optional <paramref name="onLotClicked"/>.
     /// Lots in <paramref name="crewHomeBlockId"/> (when ≥ 0) get a warm highlight.
     /// <paramref name="focusedLotId"/> (when ≥ 0) gets a second accent (selected micro-block spot).
-    /// When <paramref name="mapViewportLocalSize"/> is large enough, <b>contain</b> fit is baked into layout geometry
-    /// (so the shell can keep <c>localScale</c> at 1 for base fit — sharper rendering).</summary>
+    /// When <paramref name="mapViewportLocalSize"/> is large enough, layout geometry uses <b>cover</b> fit here.</summary>
     public static BuildResult Rebuild(RectTransform mapContentRoot, CityData city, Action<LotData> onLotClicked, int crewHomeBlockId = -1, int focusedLotId = -1, Vector2 mapViewportLocalSize = default)
     {
         if (mapContentRoot == null)
@@ -53,13 +68,7 @@ public static class OpsCityGenMapView
         {
             float ew = 400f;
             float eh = 400f;
-            if (mapViewportLocalSize.x > 16f && mapViewportLocalSize.y > 16f)
-            {
-                float sFit = Mathf.Min(mapViewportLocalSize.x / ew, mapViewportLocalSize.y / eh);
-                sFit = Mathf.Clamp(sFit, 0.02f, 200f);
-                ew *= sFit;
-                eh *= sFit;
-            }
+            ScaleLayoutSizeToViewport(ref ew, ref eh, mapViewportLocalSize, cover: true);
 
             mapContentRoot.anchorMin = mapContentRoot.anchorMax = new Vector2(0.5f, 0.5f);
             mapContentRoot.pivot = new Vector2(0.5f, 0.5f);
@@ -86,13 +95,7 @@ public static class OpsCityGenMapView
         float pxW = extent.x * inv;
         float pxH = extent.y * inv;
 
-        if (mapViewportLocalSize.x > 16f && mapViewportLocalSize.y > 16f)
-        {
-            float sFit = Mathf.Min(mapViewportLocalSize.x / pxW, mapViewportLocalSize.y / pxH);
-            sFit = Mathf.Clamp(sFit, 0.02f, 200f);
-            pxW *= sFit;
-            pxH *= sFit;
-        }
+        ScaleLayoutSizeToViewport(ref pxW, ref pxH, mapViewportLocalSize, cover: true);
 
         mapContentRoot.anchorMin = mapContentRoot.anchorMax = new Vector2(0.5f, 0.5f);
         mapContentRoot.pivot = new Vector2(0.5f, 0.5f);
@@ -112,6 +115,7 @@ public static class OpsCityGenMapView
 
     /// <summary>
     /// Macro OPS map: one clickable cell per city block (rectangles today; swap draw for hex meshes later without changing the shell).
+    /// Single-block sandbox: uses contain-fit so all macro cells (12 on a 3×4 grid) stay visible on wide layouts (cover would crop rows).
     /// </summary>
     public static BuildResult RebuildBlockMacro(RectTransform mapContentRoot, CityData city, Action<BlockData> onBlockClicked,
         int crewHomeBlockId = -1, int focusedBlockId = -1, Vector2 mapViewportLocalSize = default)
@@ -134,13 +138,9 @@ public static class OpsCityGenMapView
         {
             float ew = 400f;
             float eh = 400f;
-            if (mapViewportLocalSize.x > 16f && mapViewportLocalSize.y > 16f)
-            {
-                float sFit = Mathf.Min(mapViewportLocalSize.x / ew, mapViewportLocalSize.y / eh);
-                sFit = Mathf.Clamp(sFit, 0.02f, 200f);
-                ew *= sFit;
-                eh *= sFit;
-            }
+            // Sandbox macro: contain so placeholder still reads; wide modes use cover.
+            ScaleLayoutSizeToViewport(ref ew, ref eh, mapViewportLocalSize,
+                cover: !GameSessionState.SingleBlockSandboxEnabled);
 
             mapContentRoot.anchorMin = mapContentRoot.anchorMax = new Vector2(0.5f, 0.5f);
             mapContentRoot.pivot = new Vector2(0.5f, 0.5f);
@@ -167,13 +167,9 @@ public static class OpsCityGenMapView
         float pxW = extent.x * inv;
         float pxH = extent.y * inv;
 
-        if (mapViewportLocalSize.x > 16f && mapViewportLocalSize.y > 16f)
-        {
-            float sFit = Mathf.Min(mapViewportLocalSize.x / pxW, mapViewportLocalSize.y / pxH);
-            sFit = Mathf.Clamp(sFit, 0.02f, 200f);
-            pxW *= sFit;
-            pxH *= sFit;
-        }
+        // Sandbox: "contain" the full 3×4 (12) grid so wide viewports do not vertical-crop to ~6 tiles.
+        ScaleLayoutSizeToViewport(ref pxW, ref pxH, mapViewportLocalSize,
+            cover: !GameSessionState.SingleBlockSandboxEnabled);
 
         mapContentRoot.anchorMin = mapContentRoot.anchorMax = new Vector2(0.5f, 0.5f);
         mapContentRoot.pivot = new Vector2(0.5f, 0.5f);
@@ -248,13 +244,7 @@ public static class OpsCityGenMapView
         float pxW = extent.x * inv;
         float pxH = extent.y * inv;
 
-        if (mapViewportLocalSize.x > 16f && mapViewportLocalSize.y > 16f)
-        {
-            float sFit = Mathf.Min(mapViewportLocalSize.x / pxW, mapViewportLocalSize.y / pxH);
-            sFit = Mathf.Clamp(sFit, 0.02f, 200f);
-            pxW *= sFit;
-            pxH *= sFit;
-        }
+        ScaleLayoutSizeToViewport(ref pxW, ref pxH, mapViewportLocalSize, cover: true);
 
         mapContentRoot.anchorMin = mapContentRoot.anchorMax = new Vector2(0.5f, 0.5f);
         mapContentRoot.pivot = new Vector2(0.5f, 0.5f);
@@ -322,7 +312,20 @@ public static class OpsCityGenMapView
         }
 
         if (courtyardFogged)
-            ApplyUnidentifiedFogBaseFill(img);
+        {
+            Sprite courtyard = cfg != null ? cfg.GetCourtyardSpriteForBlock(blockId) : null;
+            if (courtyard != null)
+            {
+                ApplyBlockMapRoofSprite(img, courtyard);
+                Color veil = new Color(0.2f, 0.2f, 0.24f, 0.96f);
+                img.color = Color.Lerp(Color.white, veil, 0.62f);
+            }
+            else
+            {
+                ApplyUnidentifiedFogBaseFill(img);
+                AppendFogOfWarOverlay(rt);
+            }
+        }
         else
         {
             Sprite courtyard = cfg != null ? cfg.GetCourtyardSpriteForBlock(blockId) : null;
@@ -336,9 +339,6 @@ public static class OpsCityGenMapView
         }
 
         img.raycastTarget = false;
-
-        if (courtyardFogged)
-            AppendFogOfWarOverlay(rt);
     }
 
     /// <summary>
@@ -401,7 +401,7 @@ public static class OpsCityGenMapView
             Sprite zoneSp = OpsBigMapLotZoneResolver.TryGetSpriteForBlock(city, block.Id);
             bool fogged = ShouldDrawSandboxFogOfWar(city, block.Id, crewHomeBlockId, gridXs, gridYs);
             if (fogged)
-                ApplyUnidentifiedFogBaseFill(img);
+                ApplySandboxFogMacroBlockFill(img, rt, block, zoneSp, crewHomeBlockId, focusedBlockId);
             else if (zoneSp != null)
             {
                 rt.localEulerAngles = Vector3.zero;
@@ -422,7 +422,7 @@ public static class OpsCityGenMapView
 
             bool focused = focusedBlockId >= 0 && block.Id == focusedBlockId;
             bool home = crewHomeBlockId >= 0 && block.Id == crewHomeBlockId;
-            bool zoneArt = !fogged && zoneSp != null;
+            bool zoneArt = zoneSp != null;
             if (focused)
             {
                 Outline hi = go.AddComponent<Outline>();
@@ -455,9 +455,29 @@ public static class OpsCityGenMapView
             BlockData cap = block;
             if (onBlockClicked != null)
                 btn.onClick.AddListener(() => onBlockClicked(cap));
+        }
+    }
 
-            if (fogged)
-                AppendFogOfWarOverlay(rt);
+    /// <summary>
+    /// Sandbox FOW used to replace zone art with near-black void. Keep the same sprite / district fill under a dark veil
+    /// so the grid never looks “empty” — only unexplored / low emphasis.
+    /// </summary>
+    static void ApplySandboxFogMacroBlockFill(Image img, RectTransform rt, BlockData block, Sprite zoneSp, int crewHomeBlockId, int focusedBlockId)
+    {
+        Color veil = new Color(0.2f, 0.2f, 0.24f, 0.96f);
+        const float veilMix = 0.62f;
+        if (zoneSp != null)
+        {
+            rt.localEulerAngles = Vector3.zero;
+            ApplyBlockMapRoofSprite(img, zoneSp);
+            Color t = OpsBigMapLotZoneResolver.TintMacroBlock(block, crewHomeBlockId, focusedBlockId, emphasizeCrewHomeGold: false);
+            img.color = Color.Lerp(t, veil, veilMix);
+        }
+        else
+        {
+            img.sprite = null;
+            Color c = BlockFillColor(block, crewHomeBlockId, focusedBlockId);
+            img.color = Color.Lerp(c, veil, veilMix * 0.85f);
         }
     }
 
@@ -594,7 +614,8 @@ public static class OpsCityGenMapView
             Sprite roofSp = null;
             if (lotFogged)
             {
-                ApplyUnidentifiedFogBaseFill(img);
+                ApplySandboxFogLotFill(city, lot, img, rt, macroBigMapSurface, useSpotKindTint, crewHomeBlockId, focusedLotId,
+                    ringEightByBlock, ref anchoredSpot, ref roofSp);
             }
             else if (macroBigMapSurface)
             {
@@ -670,9 +691,66 @@ public static class OpsCityGenMapView
             LotData cap = lot;
             if (onLotClicked != null)
                 btn.onClick.AddListener(() => onLotClicked(cap));
+        }
+    }
 
-            if (lotFogged)
-                AppendFogOfWarOverlay(rt);
+    static void ApplySandboxFogLotFill(
+        CityData city,
+        LotData lot,
+        Image img,
+        RectTransform rt,
+        bool macroBigMapSurface,
+        bool useSpotKindTint,
+        int crewHomeBlockId,
+        int focusedLotId,
+        Dictionary<int, List<LotData>> ringEightByBlock,
+        ref MicroBlockSpotRuntime anchoredSpot,
+        ref Sprite roofSp)
+    {
+        Color veil = new Color(0.2f, 0.2f, 0.24f, 0.96f);
+        const float veilMix = 0.62f;
+        if (macroBigMapSurface)
+        {
+            Sprite zoneSp = OpsBigMapLotZoneResolver.TryGetSpriteForBlock(city, lot.BlockId);
+            if (zoneSp != null)
+            {
+                rt.localEulerAngles = Vector3.zero;
+                ApplyBlockMapRoofSprite(img, zoneSp);
+                roofSp = zoneSp;
+                anchoredSpot = MicroBlockWorldState.FindSpotByAnchorLotId(lot.Id);
+                Color t = OpsBigMapLotZoneResolver.TintForLot(lot, crewHomeBlockId, focusedLotId);
+                img.color = Color.Lerp(t, veil, veilMix);
+            }
+            else
+            {
+                img.sprite = null;
+                Color c = LotFillColor(lot, crewHomeBlockId, focusedLotId);
+                img.color = Color.Lerp(c, veil, veilMix * 0.85f);
+            }
+
+            return;
+        }
+
+        anchoredSpot = MicroBlockWorldState.FindSpotByAnchorLotId(lot.Id);
+        List<LotData> ringLots = null;
+        if (ringEightByBlock != null && ringEightByBlock.TryGetValue(lot.BlockId, out List<LotData> ring))
+            ringLots = ring;
+
+        RoofUiSpec roofUi = BlockRoofVisualResolver.ResolveRoofUi(anchoredSpot, lot, ringLots);
+        if (roofUi.HasSprite)
+        {
+            ApplyRoofUi(rt, img, roofUi);
+            roofSp = roofUi.Sprite;
+            Color baseC = SandboxRoofCellTint(lot, anchoredSpot, crewHomeBlockId, focusedLotId);
+            img.color = Color.Lerp(baseC, veil, veilMix);
+        }
+        else
+        {
+            img.sprite = null;
+            Color c = useSpotKindTint
+                ? LotFillColorWithSpotKind(lot, crewHomeBlockId, focusedLotId)
+                : LotFillColor(lot, crewHomeBlockId, focusedLotId);
+            img.color = Color.Lerp(c, veil, veilMix * 0.85f);
         }
     }
 

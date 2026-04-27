@@ -33,6 +33,10 @@ public static class SkillPotentialRules
             case DerivedSkill.Leadership: return CoreTrait.Charisma;
             case DerivedSkill.Medicine: return CoreTrait.Intelligence;
             case DerivedSkill.Sabotage: return CoreTrait.Intelligence;
+            case DerivedSkill.Analysis: return CoreTrait.Intelligence;
+            case DerivedSkill.Legal: return CoreTrait.Intelligence;
+            case DerivedSkill.Finance: return CoreTrait.Intelligence;
+            case DerivedSkill.Persuasion: return CoreTrait.Charisma;
             default: return CoreTrait.Determination;
         }
     }
@@ -52,8 +56,12 @@ public static class SkillPotentialRules
             case DerivedSkill.Deception: return CoreTrait.Intelligence;
             case DerivedSkill.Logistics: return CoreTrait.Determination;
             case DerivedSkill.Leadership: return CoreTrait.Determination;
-            case DerivedSkill.Medicine: return CoreTrait.MentalResilience;
+            case DerivedSkill.Medicine: return CoreTrait.Determination;
             case DerivedSkill.Sabotage: return CoreTrait.Agility;
+            case DerivedSkill.Analysis: return CoreTrait.MentalResilience;
+            case DerivedSkill.Legal: return CoreTrait.Charisma;
+            case DerivedSkill.Finance: return CoreTrait.Determination;
+            case DerivedSkill.Persuasion: return CoreTrait.Intelligence;
             default: return CoreTrait.MentalResilience;
         }
     }

@@ -31,7 +31,7 @@ public static class TraitSkillInsightTexts
             case DerivedSkill.Brawling:
                 return "Unarmed and close combat — fists, elbows, improvised weapons. Draws heavily on raw strength and agility, with grit to stay in the clinch when it gets ugly.";
             case DerivedSkill.Firearms:
-                return "Pistols, long guns, and shooting under stress. Steady hands and nerve matter as much as knowing your weapon — agility, intelligence, and sheer determination under fire.";
+                return "Pistols, long guns, and shooting under stress. Steady hands, composure, and grit under fire — agility, nerve, and determination when rounds count.";
             case DerivedSkill.Stealth:
                 return "Moving unseen, timing entries, and leaving no trace. Blends quickness, sharp reading of situations, and calm when the pressure climbs.";
             case DerivedSkill.Driving:
@@ -54,6 +54,14 @@ public static class TraitSkillInsightTexts
                 return "Treating wounds and stabilizing people under fire; also cooking up compounds and brews for whatever purpose the job needs.";
             case DerivedSkill.Sabotage:
                 return "Dismantling, defusing, and installing bombs and charges; Mike can fabricate devices too.";
+            case DerivedSkill.Analysis:
+                return "Breaking down intel, patterns, and cause and effect. Sharp mind, steady nerve, and the stubbornness to keep digging until the picture holds.";
+            case DerivedSkill.Legal:
+                return "Rules, filings, and leverage in the system. Knowledge of the book, presence in the room, and ice when the other side pushes.";
+            case DerivedSkill.Finance:
+                return "Cash flow, books, and who owes what. Numbers, follow-through, and the polish to move money without drawing the wrong eyes.";
+            case DerivedSkill.Persuasion:
+                return "Moving people without a fight — tone, framing, and timing. Charm and clarity, with the spine to hold the line when the pitch gets tested.";
             default:
                 return "";
         }

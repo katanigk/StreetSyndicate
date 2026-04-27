@@ -6,6 +6,7 @@ public static class MicroBlockDayAdvanceHooks
     public static void AfterDayIncremented(int previousDay, int newDay)
     {
         PoliceStreetPressureDaily.ProcessAfterDayAdvanced(previousDay, newDay);
-        // Future: automatic late fees, eviction warnings, neighbor events.
+        PoliceRuntimeDriver.OnCalendarDayAdvanced(previousDay, newDay);
+        FederalBureauRuntimeDriver.OnCalendarDayAdvanced(previousDay, newDay);
     }
 }

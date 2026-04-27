@@ -17,9 +17,9 @@ public static class TraitPotentialFromSkills
             case CoreTrait.Agility:
                 return new[] { DerivedSkill.Firearms, DerivedSkill.Stealth, DerivedSkill.Driving };
             case CoreTrait.Intelligence:
-                return new[] { DerivedSkill.Lockpicking, DerivedSkill.Surveillance, DerivedSkill.Logistics, DerivedSkill.Medicine, DerivedSkill.Sabotage };
+                return new[] { DerivedSkill.Lockpicking, DerivedSkill.Surveillance, DerivedSkill.Logistics, DerivedSkill.Medicine, DerivedSkill.Sabotage, DerivedSkill.Analysis, DerivedSkill.Legal, DerivedSkill.Finance };
             case CoreTrait.Charisma:
-                return new[] { DerivedSkill.Negotiation, DerivedSkill.Deception, DerivedSkill.Leadership };
+                return new[] { DerivedSkill.Negotiation, DerivedSkill.Deception, DerivedSkill.Leadership, DerivedSkill.Persuasion };
             case CoreTrait.MentalResilience:
                 return Array.Empty<DerivedSkill>();
             case CoreTrait.Determination:

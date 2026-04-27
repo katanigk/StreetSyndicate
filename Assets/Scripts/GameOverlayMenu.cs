@@ -79,6 +79,15 @@ public class GameOverlayMenu : MonoBehaviour
     private Vector2 _bossProfileWindowPos = new Vector2(-1f, -1f);
     private bool _bossProfileWindowDragging;
     private Vector2 _bossProfileWindowDragGrabOffset;
+    private Vector2 _menuWindowPos = new Vector2(-1f, -1f);
+    private bool _menuWindowDragging;
+    private Vector2 _menuWindowDragGrabOffset;
+    private bool _relationMemberInfoOpen;
+    private CrewMember _relationMemberFocus;
+    private Vector2 _relationMemberInfoScroll;
+    private Vector2 _relationMemberWindowPos = new Vector2(-1f, -1f);
+    private bool _relationMemberWindowDragging;
+    private Vector2 _relationMemberWindowDragGrabOffset;
 
     private static Texture2D Pixel
     {
@@ -237,6 +246,8 @@ public class GameOverlayMenu : MonoBehaviour
     private static GUIStyle _bossIdentityCardStyle;
     private static GUIStyle _bossStatusLabelStyle;
     private static GUIStyle _bossStatusValueStyle;
+    private static GUIStyle _relationsNameButtonStyle;
+    private static GUIStyle _relationsStatusSmallStyle;
     private static GUIStyle BossIdentityCardStyle
     {
         get
@@ -277,6 +288,36 @@ public class GameOverlayMenu : MonoBehaviour
                 _bossStatusValueStyle.normal.textColor = new Color(0.98f, 0.86f, 0.6f, 1f);
             }
             return _bossStatusValueStyle;
+        }
+    }
+
+    private static GUIStyle RelationsNameButtonStyle
+    {
+        get
+        {
+            if (_relationsNameButtonStyle == null)
+            {
+                _relationsNameButtonStyle = new GUIStyle(GUI.skin.button);
+                _relationsNameButtonStyle.alignment = TextAnchor.MiddleLeft;
+                _relationsNameButtonStyle.fontSize = 13;
+                _relationsNameButtonStyle.padding = new RectOffset(8, 8, 6, 6);
+            }
+            return _relationsNameButtonStyle;
+        }
+    }
+
+    private static GUIStyle RelationsStatusSmallStyle
+    {
+        get
+        {
+            if (_relationsStatusSmallStyle == null)
+            {
+                _relationsStatusSmallStyle = new GUIStyle(GUI.skin.label);
+                _relationsStatusSmallStyle.fontSize = 11;
+                _relationsStatusSmallStyle.normal.textColor = new Color(0.78f, 0.82f, 0.88f, 0.92f);
+                _relationsStatusSmallStyle.wordWrap = true;
+            }
+            return _relationsStatusSmallStyle;
         }
     }
 
@@ -591,6 +632,8 @@ public class GameOverlayMenu : MonoBehaviour
 
         if (_bossInfoOpen)
             DrawBossInfoWindow();
+        if (_relationMemberInfoOpen)
+            DrawRelationMemberInfoWindow();
 
         if (!_menuOpen)
             return;
@@ -601,12 +644,12 @@ public class GameOverlayMenu : MonoBehaviour
         GUI.Box(overlayRect, GUIContent.none);
         GUI.color = prev;
 
-        const float w = 280f;
-        const float pad = 16f;
-        float h = Mathf.Min(Screen.height - pad * 2f, 500f);
-        float menuX = (Screen.width - w) * 0.5f;
-        float menuY = (Screen.height - h) * 0.5f;
-        GUILayout.BeginArea(new Rect(menuX, menuY, w, h));
+        Rect menuRect = GetMenuWindowRect();
+        ProcessMenuWindowDrag(menuRect);
+        menuRect = GetMenuWindowRect();
+        DrawBossProfileWindowBackground(menuRect);
+        GUI.Box(menuRect, GUIContent.none);
+        GUILayout.BeginArea(new Rect(menuRect.x + 12f, menuRect.y + 12f, menuRect.width - 24f, menuRect.height - 24f));
         GUILayout.Label("Menu", GUI.skin.box, GUILayout.ExpandWidth(true));
         GUILayout.Space(8f);
         GUILayout.Label("Local menu only — simulation keeps running for everyone else (no global pause).", WrappedLabelStyle);
@@ -653,6 +696,10 @@ public class GameOverlayMenu : MonoBehaviour
         _menuOpen = false;
         _bossInfoOpen = false;
         _editLoadoutOpen = false;
+        _relationMemberInfoOpen = false;
+        _relationMemberFocus = null;
+        _menuWindowDragging = false;
+        _relationMemberWindowDragging = false;
     }
 
     public void OpenMenuOverlay()
@@ -660,6 +707,9 @@ public class GameOverlayMenu : MonoBehaviour
         _menuOpen = true;
         _bossInfoOpen = false;
         _editLoadoutOpen = false;
+        _relationMemberInfoOpen = false;
+        _relationMemberFocus = null;
+        _menuWindowPos = new Vector2(-1f, -1f);
     }
 
     private void DrawBossPortraitButton()
@@ -685,6 +735,8 @@ public class GameOverlayMenu : MonoBehaviour
             {
                 _bossInfoOpen = !_bossInfoOpen;
                 _menuOpen = false;
+                if (_bossInfoOpen)
+                    _bossProfileWindowPos = new Vector2(-1f, -1f);
             }
             GUI.DrawTexture(r, portrait, ScaleMode.ScaleToFit);
             Color accent = PlayerAccentTint.GetAccentColorOrNeutral();
@@ -701,6 +753,8 @@ public class GameOverlayMenu : MonoBehaviour
             {
                 _bossInfoOpen = !_bossInfoOpen;
                 _menuOpen = false;
+                if (_bossInfoOpen)
+                    _bossProfileWindowPos = new Vector2(-1f, -1f);
             }
         }
 
@@ -713,6 +767,8 @@ public class GameOverlayMenu : MonoBehaviour
     {
         _bossInfoOpen = !_bossInfoOpen;
         _menuOpen = false;
+        if (_bossInfoOpen)
+            _bossProfileWindowPos = new Vector2(-1f, -1f);
     }
 
     private static Texture2D GetBossPortraitTexture(PlayerCharacterProfile profile)
@@ -810,8 +866,8 @@ public class GameOverlayMenu : MonoBehaviour
         float y;
         if (_bossProfileWindowPos.x < 0f)
         {
-            x = Screen.width - BossProfileWindowW - 16f;
-            y = 64f;
+            x = (Screen.width - BossProfileWindowW) * 0.5f;
+            y = (Screen.height - h) * 0.5f;
         }
         else
         {
@@ -1186,6 +1242,213 @@ public class GameOverlayMenu : MonoBehaviour
         {
             DrawRelationsCard();
         });
+    }
+
+    private void OpenRelationMemberInfo(CrewMember member)
+    {
+        if (member == null)
+            return;
+        _relationMemberFocus = member;
+        _relationMemberInfoOpen = true;
+        _relationMemberInfoScroll = Vector2.zero;
+        _relationMemberWindowPos = new Vector2(-1f, -1f);
+    }
+
+    private static string RevealOrHidden(bool known, string value)
+    {
+        if (!known || string.IsNullOrWhiteSpace(value))
+            return "Classified";
+        return value.Trim();
+    }
+
+    private static string RevealOrUnknown(bool known, string value)
+    {
+        if (!known || string.IsNullOrWhiteSpace(value))
+            return "Unknown";
+        return value.Trim();
+    }
+
+    private static bool IsCrewFieldKnown(string value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+               !string.Equals(value.Trim(), "Unknown", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Rect GetCenteredWindowRect(float width, float maxHeight)
+    {
+        float h = Mathf.Min(Screen.height - 40f, maxHeight);
+        float x = (Screen.width - width) * 0.5f;
+        float y = (Screen.height - h) * 0.5f;
+        return new Rect(x, y, width, h);
+    }
+
+    private Rect GetMenuWindowRect()
+    {
+        const float width = 280f;
+        const float maxHeight = 500f;
+        float h = Mathf.Min(Screen.height - 32f, maxHeight);
+        float x;
+        float y;
+        if (_menuWindowPos.x < 0f)
+        {
+            x = (Screen.width - width) * 0.5f;
+            y = (Screen.height - h) * 0.5f;
+        }
+        else
+        {
+            x = _menuWindowPos.x;
+            y = _menuWindowPos.y;
+        }
+
+        Rect r = new Rect(x, y, width, h);
+        float maxX = Mathf.Max(0f, Screen.width - r.width);
+        float maxY = Mathf.Max(0f, Screen.height - r.height);
+        r.x = Mathf.Clamp(r.x, 0f, maxX);
+        r.y = Mathf.Clamp(r.y, 0f, maxY);
+        if (_menuWindowPos.x >= 0f)
+            _menuWindowPos = new Vector2(r.x, r.y);
+        return r;
+    }
+
+    private static void ProcessWindowDrag(
+        Rect box,
+        ref Vector2 position,
+        ref bool dragging,
+        ref Vector2 dragOffset)
+    {
+        Event e = Event.current;
+        if (e == null)
+            return;
+        if (e.type != EventType.MouseDown && e.type != EventType.MouseDrag && e.type != EventType.MouseUp)
+            return;
+
+        const float pad = 12f;
+        const float headerH = 28f;
+        float titleW = Mathf.Max(40f, box.width - pad * 2f - 36f);
+        Rect titleBar = new Rect(box.x + pad, box.y + pad, titleW, headerH);
+
+        switch (e.type)
+        {
+            case EventType.MouseDown:
+                if (e.button == 0 && titleBar.Contains(e.mousePosition))
+                {
+                    if (position.x < 0f)
+                        position = new Vector2(box.x, box.y);
+                    dragOffset = e.mousePosition - position;
+                    dragging = true;
+                    e.Use();
+                }
+                break;
+            case EventType.MouseDrag:
+                if (dragging && e.button == 0)
+                {
+                    position = e.mousePosition - dragOffset;
+                    e.Use();
+                }
+                break;
+            case EventType.MouseUp:
+                if (dragging && e.button == 0)
+                {
+                    dragging = false;
+                    e.Use();
+                }
+                break;
+        }
+    }
+
+    private void ProcessMenuWindowDrag(Rect box)
+    {
+        ProcessWindowDrag(box, ref _menuWindowPos, ref _menuWindowDragging, ref _menuWindowDragGrabOffset);
+    }
+
+    private Rect GetRelationMemberWindowRect()
+    {
+        const float windowW = 470f;
+        const float windowH = 560f;
+        float h = Mathf.Min(Screen.height - 40f, windowH);
+        float x;
+        float y;
+        if (_relationMemberWindowPos.x < 0f)
+        {
+            x = (Screen.width - windowW) * 0.5f;
+            y = (Screen.height - h) * 0.5f;
+        }
+        else
+        {
+            x = _relationMemberWindowPos.x;
+            y = _relationMemberWindowPos.y;
+        }
+
+        Rect r = new Rect(x, y, windowW, h);
+        float maxX = Mathf.Max(0f, Screen.width - r.width);
+        float maxY = Mathf.Max(0f, Screen.height - r.height);
+        r.x = Mathf.Clamp(r.x, 0f, maxX);
+        r.y = Mathf.Clamp(r.y, 0f, maxY);
+        if (_relationMemberWindowPos.x >= 0f)
+            _relationMemberWindowPos = new Vector2(r.x, r.y);
+        return r;
+    }
+
+    private void DrawRelationMemberInfoWindow()
+    {
+        if (_relationMemberFocus == null)
+        {
+            _relationMemberInfoOpen = false;
+            return;
+        }
+
+        Rect box = GetRelationMemberWindowRect();
+        ProcessWindowDrag(box, ref _relationMemberWindowPos, ref _relationMemberWindowDragging, ref _relationMemberWindowDragGrabOffset);
+        box = GetRelationMemberWindowRect();
+        DrawBossProfileWindowBackground(box);
+        GUI.Box(box, GUIContent.none);
+
+        GUILayout.BeginArea(new Rect(box.x + 12f, box.y + 12f, box.width - 24f, box.height - 24f));
+        GUILayout.BeginHorizontal();
+        GUILayout.Label("Character Profile", GUI.skin.box, GUILayout.Height(28f), GUILayout.ExpandWidth(true));
+        if (GUILayout.Button("X", GUILayout.Width(28f), GUILayout.Height(28f)))
+        {
+            _relationMemberInfoOpen = false;
+            GUILayout.EndHorizontal();
+            GUILayout.EndArea();
+            return;
+        }
+        GUILayout.EndHorizontal();
+
+        CrewMember member = _relationMemberFocus;
+        _relationMemberInfoScroll = GUILayout.BeginScrollView(_relationMemberInfoScroll);
+        GUILayout.Space(8f);
+
+        bool knowsName = IsCrewFieldKnown(member.Name);
+        bool knowsRole = IsCrewFieldKnown(member.Role);
+        bool knowsStatus = IsCrewFieldKnown(member.Status);
+        bool knowsLoyalty = IsCrewFieldKnown(member.Loyalty);
+        bool knowsSkills = IsCrewFieldKnown(member.Skills);
+
+        GUILayout.BeginVertical("box");
+        GUILayout.Label("Identity", SectionHeaderStyle);
+        GUILayout.Label("Name: " + RevealOrUnknown(knowsName, member.Name), WrappedLabelStyle);
+        GUILayout.Label("Role: " + RevealOrUnknown(knowsRole, member.Role), WrappedLabelStyle);
+        GUILayout.Label("Status: " + RevealOrUnknown(knowsStatus, member.Status), WrappedLabelStyle);
+        GUILayout.EndVertical();
+
+        GUILayout.Space(8f);
+        GUILayout.BeginVertical("box");
+        GUILayout.Label("Operational", SectionHeaderStyle);
+        GUILayout.Label("Loyalty posture: " + RevealOrHidden(knowsLoyalty, member.Loyalty), WrappedLabelStyle);
+        GUILayout.Label("Skills profile: " + RevealOrHidden(knowsSkills, member.Skills), WrappedLabelStyle);
+        GUILayout.Label("Satisfaction: " + CrewReputationSystem.GetSatisfactionLabel(member.Satisfaction), WrappedLabelStyle);
+        GUILayout.EndVertical();
+
+        GUILayout.Space(8f);
+        GUILayout.BeginVertical("box");
+        GUILayout.Label("Known / Hidden", SectionHeaderStyle);
+        GUILayout.Label("Known values appear as text. Unknown or unconfirmed values are masked.", WrappedLabelStyle);
+        GUILayout.Label("As intel systems expand, more fields here will automatically reveal based on discovery.", WrappedLabelStyle);
+        GUILayout.EndVertical();
+
+        GUILayout.EndScrollView();
+        GUILayout.EndArea();
     }
 
     /// <summary>Two separate side windows: core traits (left) and derived skills (next to boss).</summary>
@@ -1884,20 +2147,119 @@ public class GameOverlayMenu : MonoBehaviour
         GUILayout.EndVertical();
     }
 
-    private static void DrawRelationsCard()
+    private void DrawRelationsCard()
     {
         GUILayout.BeginVertical("box");
         GUILayout.Label("Relations & Connections", SectionHeaderStyle);
-        int shown = 0;
-        foreach (CrewMember m in PersonnelRegistry.Members)
-        {
-            GUILayout.Label("• " + m.Name + "  |  " + m.Role + "  |  " + m.Loyalty);
-            shown++;
-            if (shown >= 4)
-                break;
-        }
-        GUILayout.Label("...more links and rival network hooks can be added here.", WrappedLabelStyle);
+        DrawRelationBucket("Friendly", new Color(0.46f, 0.62f, 0.48f, 0.70f), RelationBucket.Friendly);
+        DrawRelationBucket("Neutral", new Color(0.70f, 0.64f, 0.38f, 0.72f), RelationBucket.Neutral);
+        DrawRelationBucket("Hostile", new Color(0.67f, 0.40f, 0.40f, 0.72f), RelationBucket.Hostile);
         GUILayout.EndVertical();
+    }
+
+    private enum RelationBucket
+    {
+        Friendly,
+        Neutral,
+        Hostile
+    }
+
+    private static bool IsBossSelfMember(int index, CrewMember m)
+    {
+        if (m == null)
+            return false;
+        if (index == 0)
+            return true;
+        if (!string.IsNullOrWhiteSpace(m.Role) && string.Equals(m.Role.Trim(), "Boss", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (!string.IsNullOrWhiteSpace(m.Name) && m.Name.IndexOf("(Boss)", StringComparison.OrdinalIgnoreCase) >= 0)
+            return true;
+        return false;
+    }
+
+    private static bool IsStartingTrustedFriend(int index, CrewMember m)
+    {
+        if (m == null)
+            return false;
+        // Day-1 party baseline: the boss starts with three close friends.
+        return index >= 1 && index <= 3;
+    }
+
+    private static RelationBucket ResolveRelationBucket(CrewMember m, int index)
+    {
+        if (IsStartingTrustedFriend(index, m))
+            return RelationBucket.Friendly;
+
+        if (m == null || string.IsNullOrWhiteSpace(m.Loyalty))
+            return RelationBucket.Neutral;
+
+        string loyalty = m.Loyalty.Trim().ToLowerInvariant();
+        if (loyalty.Contains("readytoflip") || loyalty.Contains("disloyal") || loyalty.Contains("resentful") ||
+            loyalty.Contains("enemy") || loyalty.Contains("hostile") || loyalty.Contains("betray"))
+            return RelationBucket.Hostile;
+
+        if (loyalty.Contains("devoted") || loyalty.Contains("loyal") || loyalty.Contains("attached") ||
+            loyalty.Contains("friend") || loyalty.Contains("cooperative"))
+            return RelationBucket.Friendly;
+
+        return RelationBucket.Neutral;
+    }
+
+    private void DrawRelationBucket(string title, Color bg, RelationBucket bucket)
+    {
+        Color oldBg = GUI.backgroundColor;
+        Color oldContent = GUI.contentColor;
+        GUI.backgroundColor = bg;
+        GUILayout.BeginVertical(BossIdentityCardStyle);
+        GUI.backgroundColor = oldBg;
+
+        GUI.contentColor = new Color(1f, 1f, 1f, 0.96f);
+        GUILayout.Label(title, SectionHeaderStyle);
+        GUI.contentColor = oldContent;
+        bool any = false;
+        for (int i = 0; i < PersonnelRegistry.Members.Count; i++)
+        {
+            CrewMember m = PersonnelRegistry.Members[i];
+            if (IsBossSelfMember(i, m))
+                continue;
+
+            if (ResolveRelationBucket(m, i) != bucket)
+                continue;
+
+            any = true;
+            GUI.backgroundColor = new Color(
+                Mathf.Clamp01(bg.r * 0.72f),
+                Mathf.Clamp01(bg.g * 0.72f),
+                Mathf.Clamp01(bg.b * 0.72f),
+                0.90f);
+            GUILayout.BeginVertical("box");
+            GUI.backgroundColor = oldBg;
+            string name = string.IsNullOrWhiteSpace(m.Name) ? "(Unknown)" : m.Name;
+            GUI.backgroundColor = new Color(
+                Mathf.Clamp01(bg.r * 0.85f),
+                Mathf.Clamp01(bg.g * 0.85f),
+                Mathf.Clamp01(bg.b * 0.85f),
+                0.95f);
+            if (GUILayout.Button(name, RelationsNameButtonStyle))
+                OpenRelationMemberInfo(m);
+            GUI.backgroundColor = oldBg;
+
+            string status = string.IsNullOrWhiteSpace(m.Loyalty) ? "Status: Unknown" : "Status: " + m.Loyalty.Trim();
+            GUI.contentColor = new Color(0.92f, 0.94f, 0.98f, 0.94f);
+            GUILayout.Label(status, RelationsStatusSmallStyle);
+            GUI.contentColor = oldContent;
+            GUILayout.EndVertical();
+        }
+
+        if (!any)
+        {
+            GUI.contentColor = new Color(0.90f, 0.92f, 0.96f, 0.88f);
+            GUILayout.Label("No known entries.", RelationsStatusSmallStyle);
+            GUI.contentColor = oldContent;
+        }
+
+        GUILayout.EndVertical();
+        GUILayout.Space(8f);
     }
 
     private static readonly DerivedSkill[] BossPanelDerivedSkillOrder =
@@ -1905,7 +2267,8 @@ public class GameOverlayMenu : MonoBehaviour
         DerivedSkill.Brawling, DerivedSkill.Firearms, DerivedSkill.Stealth, DerivedSkill.Driving,
         DerivedSkill.Lockpicking, DerivedSkill.Surveillance, DerivedSkill.Negotiation, DerivedSkill.Intimidation,
         DerivedSkill.Deception, DerivedSkill.Logistics, DerivedSkill.Leadership,
-        DerivedSkill.Medicine, DerivedSkill.Sabotage
+        DerivedSkill.Medicine, DerivedSkill.Sabotage,
+        DerivedSkill.Analysis, DerivedSkill.Legal, DerivedSkill.Finance, DerivedSkill.Persuasion
     };
 
     private static string GetReputationTitle(int rep)

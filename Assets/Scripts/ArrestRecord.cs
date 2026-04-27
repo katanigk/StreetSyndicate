@@ -29,7 +29,7 @@ public class ArrestRecord
     public string Notes = "";
 
     /// <summary>Evidence items accumulated for this case (1920s: analog-only sources).</summary>
-    public List<EvidenceItem> Evidence = new List<EvidenceItem>();
+    public List<ArrestEvidenceItem> Evidence = new List<ArrestEvidenceItem>();
 
     public ArrestCause GetEffectivePrimary()
     {

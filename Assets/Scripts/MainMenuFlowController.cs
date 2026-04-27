@@ -1371,7 +1371,8 @@ public class MainMenuFlowController : MonoBehaviour
         DerivedSkill.Brawling, DerivedSkill.Firearms, DerivedSkill.Stealth, DerivedSkill.Driving,
         DerivedSkill.Lockpicking, DerivedSkill.Surveillance, DerivedSkill.Negotiation, DerivedSkill.Intimidation,
         DerivedSkill.Deception, DerivedSkill.Logistics, DerivedSkill.Leadership,
-        DerivedSkill.Medicine, DerivedSkill.Sabotage
+        DerivedSkill.Medicine, DerivedSkill.Sabotage,
+        DerivedSkill.Analysis, DerivedSkill.Legal, DerivedSkill.Finance, DerivedSkill.Persuasion
     };
 
     private string GetIdentityInsightTitle()

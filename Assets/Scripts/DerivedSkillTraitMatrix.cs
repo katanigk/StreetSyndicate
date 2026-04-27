@@ -30,84 +30,114 @@ public static class DerivedSkillTraitMatrix
 
     private static readonly Influence[] Firearms =
     {
-        new Influence(CoreTrait.Agility, 0.30f),
-        new Influence(CoreTrait.Intelligence, 0.30f),
-        new Influence(CoreTrait.Determination, 0.40f)
+        new Influence(CoreTrait.Agility, 0.45f),
+        new Influence(CoreTrait.MentalResilience, 0.35f),
+        new Influence(CoreTrait.Determination, 0.20f)
     };
 
     private static readonly Influence[] Stealth =
     {
-        new Influence(CoreTrait.Agility, 0.40f),
+        new Influence(CoreTrait.Agility, 0.45f),
         new Influence(CoreTrait.Intelligence, 0.35f),
-        new Influence(CoreTrait.MentalResilience, 0.25f)
+        new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     private static readonly Influence[] Driving =
     {
-        new Influence(CoreTrait.Agility, 0.40f),
-        new Influence(CoreTrait.Intelligence, 0.50f),
-        new Influence(CoreTrait.MentalResilience, 0.10f)
+        new Influence(CoreTrait.Agility, 0.45f),
+        new Influence(CoreTrait.Intelligence, 0.35f),
+        new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     private static readonly Influence[] Lockpicking =
     {
         new Influence(CoreTrait.Intelligence, 0.55f),
-        new Influence(CoreTrait.Agility, 0.45f)
+        new Influence(CoreTrait.Agility, 0.30f),
+        new Influence(CoreTrait.Determination, 0.15f)
     };
 
     private static readonly Influence[] Surveillance =
     {
-        new Influence(CoreTrait.Intelligence, 0.30f),
-        new Influence(CoreTrait.Agility, 0.15f),
-        new Influence(CoreTrait.MentalResilience, 0.25f),
-        new Influence(CoreTrait.Determination, 0.30f)
+        new Influence(CoreTrait.Intelligence, 0.45f),
+        new Influence(CoreTrait.MentalResilience, 0.30f),
+        new Influence(CoreTrait.Determination, 0.25f)
     };
 
     private static readonly Influence[] Negotiation =
     {
         new Influence(CoreTrait.Charisma, 0.45f),
-        new Influence(CoreTrait.Intelligence, 0.40f),
-        new Influence(CoreTrait.MentalResilience, 0.15f)
+        new Influence(CoreTrait.Intelligence, 0.35f),
+        new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     private static readonly Influence[] Intimidation =
     {
-        new Influence(CoreTrait.Strength, 0.40f),
-        new Influence(CoreTrait.Charisma, 0.45f),
-        new Influence(CoreTrait.MentalResilience, 0.15f)
+        new Influence(CoreTrait.Strength, 0.45f),
+        new Influence(CoreTrait.Charisma, 0.35f),
+        new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     private static readonly Influence[] Deception =
     {
-        new Influence(CoreTrait.Charisma, 0.40f),
-        new Influence(CoreTrait.Intelligence, 0.40f),
+        new Influence(CoreTrait.Charisma, 0.45f),
+        new Influence(CoreTrait.Intelligence, 0.35f),
         new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     private static readonly Influence[] Logistics =
     {
-        new Influence(CoreTrait.Intelligence, 0.40f),
-        new Influence(CoreTrait.Determination, 0.40f),
+        new Influence(CoreTrait.Intelligence, 0.45f),
+        new Influence(CoreTrait.Determination, 0.35f),
         new Influence(CoreTrait.Agility, 0.20f)
     };
 
     private static readonly Influence[] Leadership =
     {
-        new Influence(CoreTrait.Charisma, 0.40f),
+        new Influence(CoreTrait.Charisma, 0.45f),
         new Influence(CoreTrait.Determination, 0.35f),
-        new Influence(CoreTrait.MentalResilience, 0.25f)
+        new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     private static readonly Influence[] Medicine =
     {
-        new Influence(CoreTrait.Intelligence, 0.40f),
-        new Influence(CoreTrait.Determination, 0.60f)
+        new Influence(CoreTrait.Intelligence, 0.50f),
+        new Influence(CoreTrait.Determination, 0.30f),
+        new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     private static readonly Influence[] Sabotage =
     {
-        new Influence(CoreTrait.Intelligence, 0.40f),
-        new Influence(CoreTrait.Determination, 0.60f)
+        new Influence(CoreTrait.Intelligence, 0.45f),
+        new Influence(CoreTrait.Agility, 0.30f),
+        new Influence(CoreTrait.Determination, 0.25f)
+    };
+
+    private static readonly Influence[] Analysis =
+    {
+        new Influence(CoreTrait.Intelligence, 0.55f),
+        new Influence(CoreTrait.MentalResilience, 0.25f),
+        new Influence(CoreTrait.Determination, 0.20f)
+    };
+
+    private static readonly Influence[] Legal =
+    {
+        new Influence(CoreTrait.Intelligence, 0.50f),
+        new Influence(CoreTrait.Charisma, 0.30f),
+        new Influence(CoreTrait.MentalResilience, 0.20f)
+    };
+
+    private static readonly Influence[] Finance =
+    {
+        new Influence(CoreTrait.Intelligence, 0.50f),
+        new Influence(CoreTrait.Determination, 0.30f),
+        new Influence(CoreTrait.Charisma, 0.20f)
+    };
+
+    private static readonly Influence[] Persuasion =
+    {
+        new Influence(CoreTrait.Charisma, 0.50f),
+        new Influence(CoreTrait.Intelligence, 0.30f),
+        new Influence(CoreTrait.MentalResilience, 0.20f)
     };
 
     /// <summary>Weights per trait for this skill; sum = 1 (within float tolerance).</summary>
@@ -128,6 +158,10 @@ public static class DerivedSkillTraitMatrix
             case DerivedSkill.Leadership: return Leadership;
             case DerivedSkill.Medicine: return Medicine;
             case DerivedSkill.Sabotage: return Sabotage;
+            case DerivedSkill.Analysis: return Analysis;
+            case DerivedSkill.Legal: return Legal;
+            case DerivedSkill.Finance: return Finance;
+            case DerivedSkill.Persuasion: return Persuasion;
             default:
                 return Array.Empty<Influence>();
         }

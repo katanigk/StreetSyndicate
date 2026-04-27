@@ -74,42 +74,42 @@ public static class PoliceInvestigationSystem
         }
 
         // Always: station report exists.
-        file.Evidence.Add(EvidenceItem.Create(
-            EvidenceType.DocumentsRecords,
+        file.Evidence.Add(ArrestEvidenceItem.Create(
+            ArrestEvidenceType.DocumentsRecords,
             strength: 18,
             admissibilityRisk: 8,
             summary: "Station report filed by a local caller; patrol logged the incident.",
             day: day,
-            directness: EvidenceDirectness.Indirect,
-            chain: EvidenceChainOfCustody.Clean));
+            directness: ArrestEvidenceDirectness.Indirect,
+            chain: ArrestEvidenceChainState.Clean));
 
         sb.Append("Report filed. ");
 
         if (witnessStatement)
         {
             int strength = hasMask ? 18 : 38;
-            file.Evidence.Add(EvidenceItem.Create(
-                EvidenceType.Testimony,
+            file.Evidence.Add(ArrestEvidenceItem.Create(
+                ArrestEvidenceType.Testimony,
                 strength: strength,
                 admissibilityRisk: 28,
                 summary: hasMask
                     ? "Witness statement: masked suspect; only rough build/clothing described."
                     : "Witness statement: suspect described clearly (face, voice, mannerisms).",
                 day: day,
-                directness: EvidenceDirectness.Direct,
-                chain: EvidenceChainOfCustody.Questionable));
+                directness: ArrestEvidenceDirectness.Direct,
+                chain: ArrestEvidenceChainState.Questionable));
             sb.Append("Witness statement recorded. ");
         }
         else if (humintLink)
         {
-            file.Evidence.Add(EvidenceItem.Create(
-                EvidenceType.Circumstantial,
+            file.Evidence.Add(ArrestEvidenceItem.Create(
+                ArrestEvidenceType.Circumstantial,
                 strength: 22,
                 admissibilityRisk: 55,
                 summary: "Street talk / informant lead points toward your crew (hearsay).",
                 day: day,
-                directness: EvidenceDirectness.Indirect,
-                chain: EvidenceChainOfCustody.Questionable));
+                directness: ArrestEvidenceDirectness.Indirect,
+                chain: ArrestEvidenceChainState.Questionable));
             sb.Append("HUMINT lead surfaced. ");
         }
         else
@@ -123,16 +123,16 @@ public static class PoliceInvestigationSystem
         float physicalChance = Mathf.Clamp01(0.18f + effectiveNoise * 0.40f) * (hasGloves ? 0.35f : 1f);
         if (Random.value < physicalChance)
         {
-            file.Evidence.Add(EvidenceItem.Create(
-                EvidenceType.Forensic,
+            file.Evidence.Add(ArrestEvidenceItem.Create(
+                ArrestEvidenceType.Forensic,
                 strength: hasGloves ? 10 : 28,
                 admissibilityRisk: 18,
                 summary: hasGloves
                     ? "Partial prints recovered, but smudged; low confidence."
                     : "Fingerprints recovered from the scene; usable quality.",
                 day: day,
-                directness: EvidenceDirectness.Indirect,
-                chain: EvidenceChainOfCustody.Clean));
+                directness: ArrestEvidenceDirectness.Indirect,
+                chain: ArrestEvidenceChainState.Clean));
             sb.Append("Forensic traces collected. ");
         }
 
@@ -161,11 +161,11 @@ public static class PoliceInvestigationSystem
         int score = 0;
         for (int i = 0; i < file.Evidence.Count; i++)
         {
-            EvidenceItem e = file.Evidence[i];
+            ArrestEvidenceItem e = file.Evidence[i];
             if (e == null)
                 continue;
             int v = Mathf.Clamp(e.Strength - Mathf.RoundToInt(e.AdmissibilityRisk * 0.35f), 0, 100);
-            if (e.Type == EvidenceType.Testimony && e.Directness == EvidenceDirectness.Direct)
+            if (e.Type == ArrestEvidenceType.Testimony && e.Directness == ArrestEvidenceDirectness.Direct)
                 v = Mathf.RoundToInt(v * 1.15f);
             score += v;
         }
@@ -178,7 +178,7 @@ public static class PoliceInvestigationSystem
         if (boss.Arrest == null)
             boss.Arrest = ArrestRecord.CreateDefault(ArrestCause.Unknown, GameSessionState.AgencyId.Police, GameSessionState.CurrentDay, "Police file opened.");
         if (boss.Arrest.Evidence == null)
-            boss.Arrest.Evidence = new System.Collections.Generic.List<EvidenceItem>();
+            boss.Arrest.Evidence = new System.Collections.Generic.List<ArrestEvidenceItem>();
         return boss.Arrest;
     }
 

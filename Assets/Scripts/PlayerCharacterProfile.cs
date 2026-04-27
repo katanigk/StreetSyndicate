@@ -61,7 +61,7 @@ public class PlayerCharacterProfile
     public int PoliceAttentionChannel;
     public int BusinessCredibility;
 
-    /// <summary>Per-skill XP (same order as <see cref="DerivedSkill"/> enum, length 13).</summary>
+    /// <summary>Per-skill XP (same order as <see cref="DerivedSkill"/> enum, length <see cref="DerivedSkillProgression.SkillCount"/>).</summary>
     public int[] DerivedSkillXp;
 
     /// <summary>0 = legacy trait XP; 1 = intermediate; 2 = potential derived from skills only.</summary>

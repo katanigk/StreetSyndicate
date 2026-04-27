@@ -9,7 +9,7 @@ using UnityEngine.SceneManagement;
 [Serializable]
 public class SaveGameData
 {
-    public int FormatVersion = 6;
+    public int FormatVersion = 12;
     public int CurrentDay;
     public int CrewCash;
     public bool ScoutMissionOrdered;
@@ -42,6 +42,10 @@ public class SaveGameData
     /// <summary>Sandbox Ops map: block ids revealed by travel (macro fog cleared).</summary>
     public int[] SandboxRevealedBlockIds;
 
+    public string PoliceStateJson;
+    public string BureauStateJson;
+    public string PersonalityStateJson;
+
     public static SaveGameData CaptureFromSession()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -53,9 +57,12 @@ public class SaveGameData
         if (PlayerRunState.HasCharacter && PlayerRunState.Character != null)
             profileJson = JsonUtility.ToJson(PlayerRunState.Character);
 
+        int day = GameSessionState.CurrentDay >= 1 ? GameSessionState.CurrentDay : 1;
+        PoliceWorldState.EnsureBootstrappedForSession(GameSessionState.CityMapSeed, day);
+        BureauWorldState.EnsureBootstrappedForSession(GameSessionState.CityMapSeed, day);
         return new SaveGameData
         {
-            FormatVersion = 6,
+            FormatVersion = 12,
             CurrentDay = GameSessionState.CurrentDay,
             CrewCash = GameSessionState.CrewCash,
             ScoutMissionOrdered = GameSessionState.ScoutMissionOrdered,
@@ -80,7 +87,10 @@ public class SaveGameData
             ActiveSceneName = scene.IsValid() ? scene.name : "PlanningScene",
             PlayerProfileJson = profileJson,
             MicroBlockStateJson = MicroBlockPersistence.CaptureJson(),
-            SandboxRevealedBlockIds = GameSessionState.GetSandboxRevealedBlockIdsSnapshot()
+            SandboxRevealedBlockIds = GameSessionState.GetSandboxRevealedBlockIdsSnapshot(),
+            PoliceStateJson = PoliceWorldState.CaptureJson(),
+            BureauStateJson = BureauWorldState.CaptureJson(),
+            PersonalityStateJson = PersonalityWorldState.CaptureJson()
         };
     }
 }
@@ -203,6 +213,24 @@ public static class GameSave
             for (int i = 0; i < d.SandboxRevealedBlockIds.Length; i++)
                 GameSessionState.RevealSandboxBlock(d.SandboxRevealedBlockIds[i]);
         }
+        if (d.FormatVersion >= 7 && !string.IsNullOrEmpty(d.PoliceStateJson))
+            PoliceWorldState.ApplyJson(d.PoliceStateJson);
+        else
+        {
+            PoliceWorldState.ClearAll();
+            PoliceWorldState.ResetForNewGame(GameSessionState.CityMapSeed);
+        }
+        if (d.FormatVersion >= 8 && !string.IsNullOrEmpty(d.BureauStateJson))
+            BureauWorldState.ApplyJson(d.BureauStateJson);
+        else
+        {
+            BureauWorldState.ClearAll();
+            BureauWorldState.ResetForNewGame(GameSessionState.CityMapSeed);
+        }
+        if (d.FormatVersion >= 12 && !string.IsNullOrEmpty(d.PersonalityStateJson))
+            PersonalityWorldState.ApplyJson(d.PersonalityStateJson);
+        else
+            PersonalityWorldState.ClearAll();
         GameSessionState.PlayerOrganizationStage = (GameSessionState.OrganizationStage)Mathf.Clamp(
             d.PlayerOrganizationStage, 0, (int)GameSessionState.OrganizationStage.CrimeFamily);
 

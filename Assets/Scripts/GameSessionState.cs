@@ -121,7 +121,12 @@ public static class GameSessionState
         CityGenerationConfig cfg = ScriptableObject.CreateInstance<CityGenerationConfig>();
         cfg.singleBlockSandboxMap = SingleBlockSandboxEnabled;
         if (SingleBlockSandboxEnabled)
+        {
             cfg.placeAnchorInstitutions = false;
+            // Explicit 3×4 macro grid = 12 blocks (Ops big map); avoids any drift from edited defaults.
+            cfg.singleBlockSandboxBlocksAlongX = 3;
+            cfg.singleBlockSandboxBlocksAlongY = 4;
+        }
         var gen = new CityGenerator();
         ActiveCityData = gen.Generate(cfg, CitySeed.FromExplicit(CityMapSeed));
         GovernmentDataExtractor.Refresh(ActiveCityData);
@@ -210,6 +215,9 @@ public static class GameSessionState
 
     /// <summary>Hidden: when the federal bureau is engaged with the player.</summary>
     public static FederalBureauEngagement FederalBureauState = FederalBureauEngagement.Dormant;
+
+    /// <summary>Revenue / tax case progression (Capone-style parallel track). Not yet persisted in save JSON.</summary>
+    public static readonly TaxAuthorityCaseState TaxAuthorityCase = new TaxAuthorityCaseState();
 
     /// <summary>Hidden: how strong the player's intel network is (moles/contacts), 0..100. Controls <see cref="IntelClarity"/>.</summary>
     public static int PlayerIntelNetworkRating;
@@ -1003,6 +1011,7 @@ public static class GameSessionState
         PlayerOrganizationStage = OrganizationStage.Gang;
         PlayerThreatScore = 0;
         FederalBureauState = FederalBureauEngagement.Dormant;
+        TaxAuthorityCase.Reset();
         PlayerIntelNetworkRating = 0;
         ScoutMissionOrdered = false;
         OrderedOperations.Clear();
@@ -1062,6 +1071,8 @@ public static class GameSessionState
         RebuildProceduralCityData();
 
         MicroBlockBootstrap.ResetAndBuildForNewGame(CityMapSeed);
+        PoliceWorldState.ResetForNewGame(CityMapSeed);
+        BureauWorldState.ResetForNewGame(CityMapSeed);
     }
 
     /// <summary>

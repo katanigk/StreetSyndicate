@@ -15,7 +15,11 @@ public enum DerivedSkill
     Logistics,
     Leadership,
     Medicine,
-    Sabotage
+    Sabotage,
+    Analysis,
+    Legal,
+    Finance,
+    Persuasion
 }
 
 /// <summary>
@@ -23,7 +27,7 @@ public enum DerivedSkill
 /// </summary>
 public static class DerivedSkillProgression
 {
-    public const int SkillCount = 13;
+    public const int SkillCount = 17;
 
     /// <summary>
     /// New profiles only: do not grant skill bank XP from normalized Physical bars — that formula gives every skill
@@ -49,6 +53,10 @@ public static class DerivedSkillProgression
             case DerivedSkill.Leadership: return "Leadership";
             case DerivedSkill.Medicine: return "Medicine";
             case DerivedSkill.Sabotage: return "Sabotage";
+            case DerivedSkill.Analysis: return "Analysis";
+            case DerivedSkill.Legal: return "Legal";
+            case DerivedSkill.Finance: return "Finance";
+            case DerivedSkill.Persuasion: return "Persuasion";
             default: return skill.ToString();
         }
     }
@@ -58,8 +66,16 @@ public static class DerivedSkillProgression
         if (profile == null)
             return;
 
-        if (profile.DerivedSkillXp == null || profile.DerivedSkillXp.Length != SkillCount)
+        if (profile.DerivedSkillXp == null)
             profile.DerivedSkillXp = new int[SkillCount];
+        else if (profile.DerivedSkillXp.Length != SkillCount)
+        {
+            int[] resized = new int[SkillCount];
+            int copy = Mathf.Min(profile.DerivedSkillXp.Length, SkillCount);
+            for (int i = 0; i < copy; i++)
+                resized[i] = profile.DerivedSkillXp[i];
+            profile.DerivedSkillXp = resized;
+        }
 
         if (profile.SkillRubricVersion < 1)
         {
